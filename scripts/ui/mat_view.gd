@@ -1,18 +1,19 @@
 extends Control
-## A player's 4x4 mat: lots, tiles with live badges, road routes and highlights.
+## A player's 7x7 mat: lots, tiles with live badges, road routes and highlights.
 
 const TileView = preload("res://scripts/ui/tile_view.gd")
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
+const Scoring = preload("res://scripts/core/scoring.gd")
 
 signal cell_pressed(index: int)
 signal cell_right_pressed(index: int)
 signal cell_hovered(index: int, inside: bool)
 
-const N := 4
+const N := Scoring.SIZE
 
-var cell := 128.0
-var gap := 8.0
+var cell := 76.0
+var gap := 6.0
 var pad := 12.0
 var views: Array = []
 var cells: Array = []
@@ -90,8 +91,8 @@ static func shade_dirs(c: Array, i: int) -> int:
 		var ny: int = y + d[1]
 		if nx < 0 or ny < 0 or nx >= N or ny >= N or c[ny * N + nx] == null:
 			continue
-		var k: int = c[ny * N + nx]["kind"]
-		if k == TileDefs.Kind.PARK or k == TileDefs.Kind.TREES:
+		var n = c[ny * N + nx]
+		if n["kind"] == TileDefs.Kind.PARK or TileDefs.is_tree_like(n):
 			mask |= d[2]
 	return mask
 
@@ -113,15 +114,18 @@ func refresh(p_cells: Array, p_result: Dictionary) -> void:
 		v.badge_text = ""
 		v.shade_dirs = shade_dirs(cells, i) if result["shaded"][i] else 0
 		if t != null:
-			match t["kind"]:
-				TileDefs.Kind.ROAD:
-					v.road_mask = road_mask(cells, i)
-				TileDefs.Kind.AMENITY:
-					v.badge_text = "Serves %d" % served.get(i, 0)
-				TileDefs.Kind.PARK:
-					v.badge_text = "Air -3"
-				TileDefs.Kind.TREES:
-					v.badge_text = "Air -1"
+			if TileDefs.is_service(t["kind"]):
+				v.badge_text = "Serves %d" % served.get(i, 0)
+			else:
+				match t["kind"]:
+					TileDefs.Kind.ROAD:
+						v.road_mask = road_mask(cells, i)
+						if TileDefs.is_tree_like(t):
+							v.badge_text = "Air -1"
+					TileDefs.Kind.PARK:
+						v.badge_text = "Air -3"
+					TileDefs.Kind.TREES:
+						v.badge_text = "Air -1"
 		v.queue_redraw()
 
 

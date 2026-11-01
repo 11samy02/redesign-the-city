@@ -22,6 +22,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 Sfx="*res://scripts/autoload/sfx.gd"
+Transition="*res://scripts/autoload/transition.gd"
 Game="*res://scripts/autoload/game.gd"
 
 [display]

@@ -9,11 +9,18 @@ const MatView = preload("res://scripts/ui/mat_view.gd")
 const Tooltip = preload("res://scripts/ui/tooltip.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const Bot = preload("res://scripts/core/bot.gd")
+const Roles = preload("res://scripts/core/roles.gd")
+
+signal cards_pressed
 
 var mat: MatView
 var rank_label: Label
-## Tile tooltips stay off until the tally has finished counting.
-var inspectable := false
+## Tile tooltips and the card history stay off until the tally has finished counting.
+var inspectable := false:
+	set(v):
+		inspectable = v
+		if _cards_btn != null:
+			_cards_btn.disabled = not v
 
 var _player
 var _result: Dictionary
@@ -24,6 +31,9 @@ var _citizens: Label
 var _pollution: Label
 var _loans: Label
 var _unused: Label
+var _variety: Label
+var _cards: Label
+var _cards_btn: Button
 var _complaints: HBoxContainer
 
 
@@ -38,7 +48,7 @@ func _init(player, result: Dictionary, cell: float, tooltip: Tooltip) -> void:
 	sb.border_color = col
 	add_theme_stylebox_override("panel", sb)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 10)
+	v.add_theme_constant_override("separation", 7)
 	add_child(v)
 	v.add_child(_build_head(col))
 	v.add_child(_build_mat(cell))
@@ -50,7 +60,7 @@ func _init(player, result: Dictionary, cell: float, tooltip: Tooltip) -> void:
 	v.add_child(_complaints)
 
 
-## Counts this city's score up home by home, then loans, unused amenities and complaints.
+## Counts this city's score up home by home, then loans, unused places, variety and complaints.
 ## `screen` supplies the effects layer (`fx`), the pace (`speed`) and `wait(seconds)`.
 func count(screen) -> void:
 	var r := _result
@@ -62,6 +72,8 @@ func count(screen) -> void:
 	await _count_homes(screen)
 	await _count_loans(screen)
 	await _count_unused(screen)
+	await _count_variety(screen)
+	await _count_cards(screen)
 	_set_total(_result["total"], screen.speed)
 	await _show_complaints(screen)
 	if screen.speed > 0.0:
@@ -101,11 +113,18 @@ func _build_mat(cell: float) -> Control:
 
 func _build_lines() -> Control:
 	var lines := VBoxContainer.new()
-	lines.add_theme_constant_override("separation", 4)
+	lines.add_theme_constant_override("separation", 3)
 	_citizens = _line(lines, "Citizens")
 	_pollution = _line(lines, "Pollution")
 	_loans = _line(lines, "Loans")
-	_unused = _line(lines, "Unused amenities")
+	_unused = _line(lines, "Unused places")
+	_variety = _line(lines, "Variety")
+	_cards = _line(lines, "Turn cards")
+	_cards_btn = UiKit.button("Show cards", "ghost", 14)
+	_cards_btn.disabled = true
+	_cards_btn.tooltip_text = "See every card this planner drew and what it did to the score."
+	_cards_btn.pressed.connect(cards_pressed.emit)
+	_cards.get_parent().add_child(_cards_btn)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 10)
 	box.add_child(lines)
@@ -176,11 +195,44 @@ func _count_loans(screen) -> void:
 	var r := _result
 	_loans.text = "%d, -%d points" % [r["loans"], r["loan_penalty"]] if r["loans"] > 0 else "None"
 	for k in r["loans"]:
+		var cost := Scoring.loan_penalty(k + 1) - Scoring.loan_penalty(k)
 		if screen.speed > 0.0:
-			Widgets.float_text(screen.fx, "-2 loan", _total.get_global_rect().get_center() - Vector2(0, 40), UiKit.HEAT, 26)
+			Widgets.float_text(screen.fx, "-%d loan" % cost, _total.get_global_rect().get_center() - Vector2(0, 40), UiKit.HEAT, 26)
 			Sfx.play("minus")
-		_set_total(_running - Scoring.LOAN_PENALTY, screen.speed)
+		_set_total(_running - cost, screen.speed)
 		await screen.wait(0.4)
+
+
+## The bonus for housing several kinds of citizen well.
+func _count_variety(screen) -> void:
+	var r := _result
+	var kinds: int = r["variety_roles"].size()
+	var names: Array[String] = []
+	for role in r["variety_roles"]:
+		names.append(Roles.DEFS[role]["name"])
+	_variety.text = "%d of %d kinds, %s" % [kinds, Roles.IDS.size(), Describe.points(r["variety_bonus"])] if r["variety_bonus"] > 0 else "%d of %d kinds" % [kinds, Roles.IDS.size()]
+	_variety.tooltip_text = "Kinds of citizen with at least one happy citizen: %s." % (", ".join(names) if not names.is_empty() else "none")
+	_variety.mouse_filter = Control.MOUSE_FILTER_PASS
+	if r["variety_bonus"] <= 0:
+		return
+	if screen.speed > 0.0:
+		Widgets.float_text(screen.fx, "%s variety" % Describe.signed(r["variety_bonus"]), _total.get_global_rect().get_center() - Vector2(0, 40), UiKit.OLIVE, 26)
+		Sfx.play("tick")
+	_set_total(_running + r["variety_bonus"], screen.speed)
+	await screen.wait(0.4)
+
+
+## Points won or lost through event and penalty cards.
+func _count_cards(screen) -> void:
+	var pts: int = _result["card_points"]
+	_cards.text = Describe.points(pts) if pts != 0 else "None"
+	if pts == 0:
+		return
+	if screen.speed > 0.0:
+		Widgets.float_text(screen.fx, "%s cards" % Describe.signed(pts), _total.get_global_rect().get_center() - Vector2(0, 40), UiKit.OLIVE if pts > 0 else UiKit.HEAT, 26)
+		Sfx.play("tick" if pts > 0 else "minus")
+	_set_total(_running + pts, screen.speed)
+	await screen.wait(0.4)
 
 
 func _count_unused(screen) -> void:
@@ -196,6 +248,20 @@ func _count_unused(screen) -> void:
 		await screen.wait(0.4)
 
 
+## "2x No library within reach" lines for every specific complaint of one type.
+func _detail_text(type: String) -> String:
+	var counts := {}
+	for a in _result["apartments"]:
+		for m in a["members"]:
+			if m["complaint"] == type:
+				counts[m["complaint_detail"]] = counts.get(m["complaint_detail"], 0) + 1
+	var out: Array[String] = []
+	for d in counts:
+		out.append("%dx %s" % [counts[d], d])
+	return "
+".join(out)
+
+
 func _show_complaints(screen) -> void:
 	var r := _result
 	for type in Describe.COMPLAINTS:
@@ -206,7 +272,8 @@ func _show_complaints(screen) -> void:
 		chip.add_theme_constant_override("separation", 2)
 		chip.add_child(UiKit.icon(Describe.COMPLAINTS[type]["icon"], 26))
 		chip.add_child(UiKit.label(str(n), 18, UiKit.HEAT, "display_bold"))
-		chip.tooltip_text = "%d %s complaint%s: %s" % [n, type, "" if n == 1 else "s", Describe.COMPLAINTS[type]["meaning"]]
+		chip.tooltip_text = "%d %s complaint%s: %s
+%s" % [n, type, "" if n == 1 else "s", Describe.COMPLAINTS[type]["meaning"], _detail_text(type)]
 		chip.mouse_filter = Control.MOUSE_FILTER_PASS
 		_complaints.add_child(chip)
 		if screen.speed > 0.0:

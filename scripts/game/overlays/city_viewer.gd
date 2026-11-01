@@ -7,7 +7,8 @@ const Describe = preload("res://scripts/ui/describe.gd")
 const TileView = preload("res://scripts/ui/tile_view.gd")
 const MatView = preload("res://scripts/ui/mat_view.gd")
 const Tooltip = preload("res://scripts/ui/tooltip.gd")
-const Influence = preload("res://scripts/game/influence.gd")
+const Scoring = preload("res://scripts/core/scoring.gd")
+const Influence =preload("res://scripts/game/influence.gd")
 const OverlayKit = preload("res://scripts/ui/overlay_kit.gd")
 
 signal closed
@@ -33,7 +34,10 @@ func _ready() -> void:
 	h.add_theme_constant_override("separation", 28)
 	card.add_child(h)
 	_mat = MatView.new()
-	_mat.setup(118, 8, TileView.Mode.MAT)
+	# the whole mat has to fit the screen height, with room for the card's padding and border
+	var gap := 8
+	var cell := mini(118, int((get_viewport_rect().size.y - 140.0 - gap * (Scoring.SIZE - 1)) / Scoring.SIZE))
+	_mat.setup(cell, gap, TileView.Mode.MAT)
 	_mat.refresh(_player.cells, _result)
 	_mat.cell_hovered.connect(_on_cell_hovered)
 	h.add_child(_mat)

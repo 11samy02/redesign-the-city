@@ -54,9 +54,11 @@ func _ready() -> void:
 	v.add_child(_row("Sound effects", "M switches during a game.",
 		_segmented(["On", "Off"], 1 if s["muted"] else 0, func(i): Game.set_setting("muted", i == 1))))
 	v.add_child(_row("Bot speed", "How long computer planners take per move.",
-		_segmented(["Slow", "Normal", "Fast"], s["bot_speed"], func(i): Game.set_setting("bot_speed", i))))
+		_segmented(["Slow", "Normal", "Fast", "Instant"], s["bot_speed"], func(i): Game.set_setting("bot_speed", i))))
 	v.add_child(_row("Animations", "Fast plays every animation quicker.",
 		_segmented(["Normal", "Fast"], 1 if s["fast_animations"] else 0, func(i): Game.set_setting("fast_animations", i == 1))))
+	v.add_child(_row("Anti-aliasing", "Smooths jagged edges on cards and tiles.",
+		_segmented(["On", "Off"], 0 if s["antialiasing"] else 1, func(i): Game.set_setting("antialiasing", i == 0))))
 
 	_panel.pivot_offset = _panel.size / 2
 	modulate.a = 0.0

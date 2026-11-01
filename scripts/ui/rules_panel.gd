@@ -4,10 +4,16 @@ extends Control
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
 const Describe = preload("res://scripts/ui/describe.gd")
+const CircumstanceDefs = preload("res://scripts/core/circumstance_defs.gd")
+const Roles = preload("res://scripts/core/roles.gd")
+const CardDefs = preload("res://scripts/core/card_defs.gd")
+const Scoring = preload("res://scripts/core/scoring.gd")
+const GameState = preload("res://scripts/core/game_state.gd")
+const CircumstanceCardFace = preload("res://scripts/game/circumstance_card_face.gd")
 
 signal closed
 
-const TABS := ["The goal", "Your turn", "Tiles", "Happiness", "Complaints", "Objectives"]
+const TABS := ["The goal", "Your turn", "Tiles", "People and needs", "Happiness", "Complaints", "Turn cards", "Hidden circumstances", "Objectives"]
 
 var _panel: PanelContainer
 var _content: VBoxContainer
@@ -129,9 +135,12 @@ func _show_tab(i: int) -> void:
 		0: _goal()
 		1: _turn()
 		2: _tiles()
-		3: _happiness()
-		4: _complaints()
-		5: _objectives()
+		3: _people()
+		4: _happiness()
+		5: _complaints()
+		6: _turn_cards()
+		7: _events()
+		8: _objectives()
 	_scroll.scroll_vertical = 0
 	_content.modulate.a = 0.0
 	create_tween().tween_property(_content, "modulate:a", 1.0, 0.15)
@@ -179,6 +188,20 @@ func _stat(value: String, caption: String) -> Control:
 	return v
 
 
+## A card rule with the happiness words replaced by a smiley (see CircumstanceCardFace.happiness_icons).
+func _rule_text(text: String, size: int) -> RichTextLabel:
+	var rt := RichTextLabel.new()
+	rt.bbcode_enabled = true
+	rt.fit_content = true
+	rt.scroll_active = false
+	rt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rt.add_theme_font_override("normal_font", UiKit.font("body"))
+	rt.add_theme_font_size_override("normal_font_size", size)
+	rt.add_theme_color_override("default_color", UiKit.LIMESTONE)
+	rt.text = CircumstanceCardFace.happiness_icons(text, "7ED957", "FF8A7A", size)
+	return rt
+
+
 func _wrap_label(text: String, size := 17, color := UiKit.LIMESTONE) -> Label:
 	var l := UiKit.label(text, size, color)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -190,29 +213,44 @@ func _wrap_label(text: String, size := 17, color := UiKit.LIMESTONE) -> Label:
 
 func _goal() -> void:
 	_h("Build the happiest city in Egkomi")
-	_p("You are a city planner. Every round you buy tiles from the shared construction site and build them on your own 4x4 mat. [b]Apartments[/b] bring citizens, while [b]amenities, parks, trees and roads[/b] keep those citizens happy. After 4 rounds, the planner whose citizens score the most points wins.")
+	_p("You are a city planner. Every round you buy tiles from the shared construction site and build them on your own %dx%d mat. [b]Homes[/b] bring citizens, and every citizen needs different places nearby: a student needs a library, a child needs a school, an older resident needs a clinic, an expat needs a restaurant. [b]Services, parks, trees and roads[/b] keep them happy. After %d rounds, the planner whose citizens score the most points wins." % [Scoring.SIZE, Scoring.SIZE, GameState.ROUNDS])
 	var stats := HBoxContainer.new()
 	stats.add_theme_constant_override("separation", 12)
-	for s in [["4", "rounds"], ["2", "tiles per player per round"], ["36", "tiles in the 6x6 shop"], ["4x4", "grid on each mat"]]:
+	for s in [[str(GameState.ROUNDS), "rounds"], [str(GameState.BUYS_PER_TURN), "tiles per player per round"], ["%dx%d" % [Scoring.SIZE, Scoring.SIZE], "grid on each mat"], [str(GameState.START_MONEY), "gold to start with"]]:
 		stats.add_child(_card([_stat(s[0], s[1])]))
 	for c in stats.get_children():
 		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(stats)
 	_h("Setup")
-	_p("Each planner starts with [color=#F2B630][b]20 gold[/b][/color], [b]2 free road tiles[/b] and a mat with [b]pollution 10[/b].")
-	_p("With 2 or 3 planners, 4 random tiles per missing planner are removed from the shop so it stays balanced. Removed lots show as hatched squares.", UiKit.MUTED, 16)
+	_p("Each planner starts with [color=#F2B630][b]%d gold[/b][/color], [b]%d free road tiles[/b] and a mat with [b]pollution %d[/b]. There is no income: the gold you start with has to last all game." % [GameState.START_MONEY, GameState.FREE_ROADS, Scoring.START_POLLUTION])
+	_p("The shop holds %d tiles for 4 planners. With 2 or 3 planners, %d random tiles per missing planner are removed so it stays balanced. By the end you will have built %d tiles: %d bought and %d free roads." % [TileDefs.BAG_SIZE, GameState.REMOVED_PER_MISSING_PLAYER, GameState.ROUNDS * GameState.BUYS_PER_TURN + GameState.FREE_ROADS, GameState.ROUNDS * GameState.BUYS_PER_TURN, GameState.FREE_ROADS], UiKit.MUTED, 16)
 	_h("Winning")
-	_p("Every citizen scores its happiness (-3 to +3) as points, and every loan costs 2 points, and every amenity that no home can reach costs 1 point. Totals can be negative. Ties go to the planner with more happy citizens, then more gold left.")
+	_p("Every citizen scores its happiness (-5 to +5) as points. Every loan costs points (%s), and every service that no home can reach costs %d point. A mixed city earns a variety bonus (%s): a kind of citizen counts once at least one of them is happy, and every kind is worth more than the last, because each needs different services at the same time. Totals can be negative. Ties go to the planner with more happy citizens, then more gold left." % [_loan_costs(), Scoring.UNUSED_PENALTY, _variety_costs()])
+
+
+func _variety_costs() -> String:
+	var parts: Array[String] = []
+	for kinds in range(2, Scoring.VARIETY_BONUS.size()):
+		parts.append("%d kinds +%d" % [kinds, Scoring.VARIETY_BONUS[kinds]])
+	return ", ".join(parts)
+
+
+func _loan_costs() -> String:
+	var parts: Array[String] = []
+	for n in 3:
+		parts.append(str(Scoring.loan_penalty(n + 1) - Scoring.loan_penalty(n)))
+	return "%s, then %d and more for every further one" % [", ".join(parts), Scoring.LOAN_PENALTIES[-1] + Scoring.LOAN_STEP]
 
 
 func _turn() -> void:
 	_h("Your turn")
 	var steps := [
-		["Pick a tile", "Click a tile in the construction site. Its gold cost is on the coin. You must buy 2 tiles every round."],
+		["Pick a tile", "Click a stack in the construction site. Its gold cost is on the coin and the number in the corner is how many are left. You must buy %d tiles every round." % GameState.BUYS_PER_TURN],
+		["Check who lives there", "Homes show round icons for the citizens inside. Hover a home to see what each of them needs, likes and dislikes before you buy."],
 		["Build it", "Click an empty lot on your mat. Building is permanent, so think about roads and neighbours first. Right-click or Esc puts the tile back."],
-		["Free roads", "Place your 2 free roads on any empty lot during any of your turns. They never count as purchases."],
-		["Loan if needed", "Only when you cannot afford the tiles you still have to buy: +10 gold now, -2 points at the end."],
-		["End your turn", "After 2 purchases, end your turn and pass the mouse and keyboard to the next planner."],
+		["Free roads", "Place your %d free roads on any empty lot during any of your turns. They never count as purchases." % GameState.FREE_ROADS],
+		["Loan if needed", "Only when you cannot afford the tiles you still have to buy: +%d gold now, and points off at the end (%s)." % [GameState.LOAN_AMOUNT, _loan_costs()]],
+		["End your turn", "After %d purchases, end your turn and pass the mouse and keyboard to the next planner." % GameState.BUYS_PER_TURN],
 	]
 	for i in steps.size():
 		var num := UiKit.label(str(i + 1), 34, UiKit.GOLD, "display_bold")
@@ -224,7 +262,7 @@ func _turn() -> void:
 		_content.add_child(_card([num, col]))
 	_p("[b]Turn order.[/b] The first round is drawn at random. In every later round the city with the fewest points so far picks first; a tie goes to whoever picked later last round. The round banner and the numbered planner cards show the order.", UiKit.MUTED, 16)
 	_h("A loan can still pay off")
-	_p("A large apartment adds 3 citizens. If all of them are fully happy (+3 each), that is 3 + 3 + 3 - 2 = [color=#8DBB3C][b]7 points[/b][/color], even after the loan.")
+	_p("A family in a large apartment adds 3 citizens. If all of them are fully happy (+5 each), that is [color=#8DBB3C][b]15 points[/b][/color], more than the %d points the first loan costs. A second loan costs more, so borrow only when it buys you something." % (Scoring.loan_penalty(1)))
 	_h("Controls")
 	var grid := GridContainer.new()
 	grid.columns = 2
@@ -249,11 +287,12 @@ func _turn() -> void:
 
 func _tiles() -> void:
 	_h("Tile set")
-	_p("Three families of tiles. Hover any tile in the game to see exactly what it does on your mat right now.", UiKit.MUTED, 16)
-	var rows := [
-		[TileDefs.Kind.APT_S, 0], [TileDefs.Kind.APT_M, 0], [TileDefs.Kind.APT_L, 0],
-		[TileDefs.Kind.AMENITY, 0], [TileDefs.Kind.PARK, 0], [TileDefs.Kind.TREES, 0], [TileDefs.Kind.ROAD, 0],
-	]
+	_p("Homes, services, green space and streets. Hover any tile in the game to see exactly what it does on your mat right now. Quantities are for 4 planners.", UiKit.MUTED, 16)
+	var rows: Array = []
+	for g in TileDefs.GROUPS:
+		for k in g["kinds"]:
+			rows.append([k, 0])
+	rows.append_array([[TileDefs.Kind.ROAD, 1], [TileDefs.Kind.ROAD, 2], [TileDefs.Kind.ROAD, 3]])
 	for r in rows:
 		var t := TileDefs.make(r[0], r[1])
 		var info := TileDefs.info(r[0])
@@ -262,33 +301,69 @@ func _tiles() -> void:
 		mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var title := HBoxContainer.new()
 		title.add_theme_constant_override("separation", 10)
-		title.add_child(UiKit.label(info["name"], 21, UiKit.LIMESTONE, "display_bold"))
+		title.add_child(UiKit.label(TileDefs.display_name(t), 21, UiKit.LIMESTONE, "display_bold"))
 		title.add_child(UiKit.chip(info["category"], UiKit.CATEGORY_COLORS[info["category"]], UiKit.LIMESTONE, 13))
-		title.add_child(UiKit.chip("x%d in shop" % info["qty"], UiKit.PANEL, UiKit.MUTED, 13))
+		var in_shop: int = TileDefs.STREET_BAG.count(r[1]) if r[0] == TileDefs.Kind.ROAD else info["qty"]
+		title.add_child(UiKit.chip("x%d in shop" % in_shop, UiKit.PANEL, UiKit.MUTED, 13))
 		mid.add_child(title)
-		var eff: String = Describe.effect_text(t)
-		if r[0] == TileDefs.Kind.AMENITY:
-			eff += " Comes as a café, clinic, school or market."
-		mid.add_child(_wrap_label(eff, 16, UiKit.MUTED))
-		var objs := HBoxContainer.new()
-		for o in info["objectives"]:
-			objs.add_child(UiKit.chip("%s %s" % [o, UiKit.OBJECTIVE_SHORT[o]], UiKit.PANEL, UiKit.MUTED, 12))
-		mid.add_child(objs)
+		mid.add_child(_wrap_label(Describe.effect_text(t), 16, UiKit.MUTED))
+		if TileDefs.HOUSEHOLDS.has(r[0]):
+			var names: Array[String] = []
+			for h in TileDefs.HOUSEHOLDS[r[0]]:
+				names.append(h["name"])
+			mid.add_child(_wrap_label("Households: " + ", ".join(names), 15, UiKit.LIMESTONE))
 		var cost := HBoxContainer.new()
 		cost.add_theme_constant_override("separation", 6)
 		cost.add_child(UiKit.icon("res://assets/ui/coin.svg", 30))
-		cost.add_child(UiKit.label(str(info["cost"]), 28, UiKit.GOLD, "display_bold"))
+		cost.add_child(UiKit.label(str(TileDefs.tile_cost(t)), 28, UiKit.GOLD, "display_bold"))
 		_content.add_child(_card([icon, mid, cost]))
-	_p("[b]36 tiles:[/b] 11 apartments, 8 amenities, 9 green spaces and 8 roads. The 2 free roads per planner come on top. With 4 planners, 32 tiles are bought and 4 stay in the shop.", UiKit.LIMESTONE, 16)
+	_p("[b]%d tiles in the shop.[/b] With 4 planners, %d are bought and %d stay in the shop. The %d free roads per planner come on top." % [TileDefs.BAG_SIZE, 4 * GameState.ROUNDS * GameState.BUYS_PER_TURN, TileDefs.BAG_SIZE - 4 * GameState.ROUNDS * GameState.BUYS_PER_TURN, GameState.FREE_ROADS], UiKit.LIMESTONE, 16)
+
+
+func _people() -> void:
+	_h("People and needs")
+	_p("Who lives in a home depends on the home you buy. Each citizen has a [b]role[/b], and every role has two needs, a few likes and sometimes a dislike. Plan the neighbourhood around the people you house.")
+	for role in Roles.IDS:
+		var d: Dictionary = Roles.DEFS[role]
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_child(UiKit.label(d["name"], 22, Color(d["color"]).lightened(0.3), "display_bold"))
+		var needs: Array[String] = []
+		for n in d["needs"]:
+			needs.append("a " + Roles.NEEDS[n]["name"])
+		col.add_child(_wrap_label("Needs " + " and ".join(needs) + ". Each need that is met adds happiness; each one that is missing takes it away.", 16, UiKit.LIMESTONE))
+		var likes: Array[String] = []
+		for k in d["like_kinds"]:
+			likes.append(TileDefs.DEFS[k]["name"].to_lower())
+		for s in d["like_streets"]:
+			likes.append(TileDefs.STREETS[s]["name"].to_lower())
+		var extra := "Likes: %s (+1 if any is within reach)." % ", ".join(likes)
+		if d["dislike_kind"] >= 0:
+			extra += " Dislikes a %s right next door (-1)." % TileDefs.DEFS[d["dislike_kind"]]["name"].to_lower()
+		if d["heat_factor"] > 1:
+			extra += " Feels a long, unshaded walk twice as hard."
+		col.add_child(_wrap_label(extra, 15, UiKit.MUTED))
+		_content.add_child(_card([UiKit.icon(d["icon"], 56), col]))
+	_h("Who lives where")
+	for kind in TileDefs.HOUSEHOLDS:
+		var parts: Array[String] = []
+		for h in TileDefs.HOUSEHOLDS[kind]:
+			var who: Array[String] = []
+			for r in h["members"]:
+				who.append(Roles.DEFS[r]["name"].to_lower())
+			parts.append("%s (%s)" % [h["name"], ", ".join(who)])
+		_content.add_child(_card([UiKit.icon(TileDefs.art_path(TileDefs.make(kind)), 56), _wrap_label("[b]%s:[/b] %s" % [TileDefs.DEFS[kind]["name"], "; ".join(parts)], 16, UiKit.LIMESTONE)]))
+	_p("[b]Parking:[/b] Egkomi has been asking for parking for years, so everyone but the children likes having it within reach (residents with a disability like the reserved bays). Only children dislike it right next to their home (traffic).", UiKit.MUTED, 16)
 
 
 func _happiness() -> void:
 	_h("Citizen happiness")
-	_p("Every citizen has a happy bar from [color=#E0533A][b]-3[/b][/color] to [color=#8DBB3C][b]+3[/b][/color] and scores it as points. All citizens in one apartment share the same bar. The faces on your mat show it live.")
+	_p("Every citizen has a happy bar from [color=#E0533A][b]-5[/b][/color] to [color=#8DBB3C][b]+5[/b][/color] and scores it as points. Each citizen in a home has their own bar, so a family can have a happy parent and an unhappy child. The faces on your mat show it live.")
 	var rows := [
-		["res://assets/ui/route.svg", "+1 per amenity reached by road", "A road path must run from the apartment to the amenity. Standing next to each other does not count. All citizens move the same way, so the road layout decides who can reach what."],
-		["res://assets/ui/leaf.svg", "+1 per park or trees nearby", "A park cheers up its whole 3x3 area, diagonals included. Trees cheer up the 4 tiles that share an edge with them."],
-		["res://assets/ui/sun.svg", "-1 for a long, hot walk", "A route of 2 or more road tiles to an amenity costs 1 happiness from the heat, unless at least one road on it is shaded. A single road tile is never hot."],
+		["res://assets/ui/route.svg", "Needs: +2, 0 or -2", "A need is met when a road path runs from the home to a matching place (a child's park only needs to be in the home's 3x3 area). Both needs met is +2, one is 0, none is -2. Standing next to each other without a road does not count."],
+		["res://assets/ui/trophy.svg", "+1 for something they like", "Any one of a citizen's liked places within reach, or a liked street on their route or next to their home, adds +1 once."],
+		["res://assets/ui/leaf.svg", "+1 per park or trees nearby (up to +2)", "A park cheers up its whole 3x3 area, diagonals included. Trees cheer up the 4 tiles that share an edge with them. Everyone in the home shares it."],
+		["res://assets/ui/sun.svg", "-1 for a long, hot walk", "A route of %d or more road tiles to something a citizen needs costs 1 happiness from the heat (older residents feel it twice), unless at least one road on it is shaded." % Scoring.LONG_ROUTE],
 		["res://assets/ui/leaf.svg", "Shade", "A road next to trees or a park counts as shaded. It shows a leafy green shadow on the side facing the trees and a Shade badge. Grey smog clouds are pollution, not shade."],
 	]
 	for r in rows:
@@ -298,10 +373,10 @@ func _happiness() -> void:
 		col.add_child(_wrap_label(r[2], 16, UiKit.MUTED))
 		_content.add_child(_card([UiKit.icon(r[0], 44), col]))
 	_h("Pollution")
-	_p("Every mat starts at pollution 10. Each [b]park lowers it by 3[/b] and each [b]trees tile by 1[/b], never below 0. At the end it changes the happiness of every citizen on that mat:")
+	_p("Every mat starts at pollution %d. Each [b]park lowers it by 3[/b] and each [b]trees tile by 1[/b], never below 0. At the end it changes the happiness of every citizen on that mat:" % Scoring.START_POLLUTION)
 	var bands := HBoxContainer.new()
 	bands.add_theme_constant_override("separation", 12)
-	for b in [["0 to 5", "No change", UiKit.OLIVE], ["6 to 8", "-1 happiness", UiKit.GOLD], ["9 to 10", "-2 happiness", UiKit.HEAT]]:
+	for b in [["0 to 7", "No change", UiKit.OLIVE], ["8 to 12", "-1 happiness", UiKit.GOLD], ["13 to %d" % Scoring.START_POLLUTION, "-2 happiness", UiKit.HEAT]]:
 		var v := VBoxContainer.new()
 		v.add_child(UiKit.label(b[0], 28, b[2], "display_bold"))
 		v.add_child(UiKit.label(b[1], 16, UiKit.LIMESTONE))
@@ -309,12 +384,12 @@ func _happiness() -> void:
 		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		bands.add_child(c)
 	_content.add_child(bands)
-	_p("Example: 1 park and 2 trees bring a mat from 10 down to 5, so pollution no longer affects anyone. A mat with no green space stays at 10 and every citizen on it loses 2 happiness.", UiKit.MUTED, 16)
+	_p("Example: 2 parks and 2 trees bring a mat from %d down to %d, so pollution no longer affects anyone. A mat with no green space stays at %d and every citizen on it loses 2 happiness." % [Scoring.START_POLLUTION, Scoring.START_POLLUTION - 8, Scoring.START_POLLUTION], UiKit.MUTED, 16)
 
 
 func _complaints() -> void:
 	_h("Complaints")
-	_p("Every unhappy citizen (below 0) files a complaint about the main cause of their mood. You can see them on each apartment's card while you play.")
+	_p("Every unhappy citizen (below 0) files a complaint. A missing need always comes first and is named in plain words, for example [b]No library within reach[/b]. You can see them on each home's card while you play.")
 	for type in Describe.COMPLAINTS:
 		var c: Dictionary = Describe.COMPLAINTS[type]
 		var col := VBoxContainer.new()
@@ -322,7 +397,56 @@ func _complaints() -> void:
 		col.add_child(UiKit.label(type, 21, UiKit.LIMESTONE, "display_bold"))
 		col.add_child(_wrap_label("%s The fix: %s." % [c["meaning"], c["fix"].to_lower()], 16, UiKit.MUTED))
 		_content.add_child(_card([UiKit.icon(c["icon"], 44), col]))
-	_p("At the end of the game, each planner names the one change that would add the most points to their city. Every home below +3 and every amenity nobody reaches still has room to improve, so there is always something to name.")
+	_p("At the end of the game, each planner names the one change that would add the most points to their city. Every citizen below +5 and every service nobody reaches still has room to improve, so there is always something to name.")
+
+
+func _turn_cards() -> void:
+	_h("Event and penalty cards")
+	_p("At the start of every turn, tap the coin. [b]Heads[/b]: tap the [color=#6FD08C][b]event deck[/b][/color] for good news. [b]Tails[/b]: tap the [color=#F08A78][b]penalty deck[/b][/color] for trouble. The card is shown to everyone and its effect happens [b]at once[/b].")
+	var decks := HBoxContainer.new()
+	decks.add_theme_constant_override("separation", 12)
+	for pair in [[CardDefs.EVENT, "Event cards", "Reward planners: gold, free tiles, cheaper tiles, extra buys or points. Some reward several planners, and some take from the others.", "res://assets/ui/event.svg"],
+			[CardDefs.PENALTY, "Penalty cards", "Punish planners: fees, lost tiles, dearer tiles, fewer buys or lost points. Some hit several planners, and some give you a choice of pain.", "res://assets/ui/penalty.svg"]]:
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_child(UiKit.label(pair[1], 22, UiKit.LIMESTONE, "display_bold"))
+		col.add_child(_wrap_label(pair[2], 16, UiKit.MUTED))
+		var c := _card([UiKit.icon(pair[3], 60), col])
+		c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		decks.add_child(c)
+	_content.add_child(decks)
+	_p("[b]How cards work.[/b] Each deck has %d cards and a card is drawn at most once per game. Gold never drops below 0, and you cannot pay more than you have. \"The player with the most or least\" means everyone who ties for it. A card that changes prices or the number of tiles you may buy lasts for this turn only. A free tile is placed from the [b]Free tile[/b] button (B), costs nothing and is not one of your purchases. Some cards ask you to choose between two options. Every card you draw is remembered: on the final scoring screen, press [b]Show cards[/b] under a city to see each card and what it did to that planner's gold and points." % CardDefs.DECK_SIZE, UiKit.MUTED, 16)
+	for type in CardDefs.TYPES:
+		_h("Every event card" if type == CardDefs.EVENT else "Every penalty card")
+		for id in CardDefs.ids(type):
+			var info := CardDefs.info(id)
+			var col := VBoxContainer.new()
+			col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			col.add_theme_constant_override("separation", 0)
+			col.add_child(UiKit.label(info["title"], 18, UiKit.LIMESTONE, "display_bold"))
+			col.add_child(_wrap_label(info["rule"], 15, UiKit.MUTED))
+			var badge := UiKit.chip(info["badge"], Color("#2F7A4A") if type == CardDefs.EVENT else Color("#8E3328"), UiKit.LIMESTONE, 13)
+			_content.add_child(_card([UiKit.icon(CardDefs.art_path(id), 52), col, badge]))
+
+
+func _events() -> void:
+	_h("Hidden circumstances")
+	_p("At the start of every round one hidden circumstance card is turned over. The deck holds %d cards and a game draws %d of them, so nobody knows what is coming. Every planner gets the same card, and it changes only happiness, points or gold, never your tiles." % [CircumstanceDefs.IDS.size(), GameState.ROUNDS])
+	_p("[b]Happiness effects[/b] stay on until the end of the game and count in every score. [b]Gold effects[/b] happen once, the moment the card is revealed (gold never drops below 0). The cards shown so far sit in the top bar: hover one to read it again.", UiKit.MUTED, 16)
+	for id in CircumstanceDefs.IDS:
+		var info := CircumstanceDefs.info(id)
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var title := HBoxContainer.new()
+		title.add_theme_constant_override("separation", 10)
+		title.add_child(UiKit.label(info["title"], 21, UiKit.LIMESTONE, "display_bold"))
+		var weather: bool = info["family"] == CircumstanceDefs.FAMILY_WEATHER
+		title.add_child(UiKit.chip(info["family"], UiKit.SKY if weather else UiKit.BOUG, Color.WHITE, 13))
+		col.add_child(title)
+		col.add_child(_rule_text(info["rule"], 17))
+		col.add_child(_wrap_label(info["tip"], 15, UiKit.MUTED))
+		_content.add_child(_card([UiKit.icon(CircumstanceDefs.art_path(id), 84), col]))
+	_p("[b]Tip:[/b] keep a little gold in reserve for a budget cut, shade your long walks for a heatwave, and put parks and trees next to your homes. Those choices pay off whichever card turns up.", UiKit.LIMESTONE, 16)
 
 
 func _objectives() -> void:

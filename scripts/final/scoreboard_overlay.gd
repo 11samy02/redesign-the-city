@@ -5,11 +5,14 @@ const UiKit = preload("res://scripts/ui/ui_kit.gd")
 const Widgets = preload("res://scripts/ui/widgets.gd")
 const Describe = preload("res://scripts/ui/describe.gd")
 const OverlayKit = preload("res://scripts/ui/overlay_kit.gd")
+const CircumstanceDefs = preload("res://scripts/core/circumstance_defs.gd")
 
 signal reflect_pressed
 signal cities_pressed
 signal again_pressed
 signal menu_pressed
+## The "Cards" button of a row: the seat of that planner.
+signal cards_pressed(index: int)
 
 const PLACES := ["1st", "2nd", "3rd", "4th"]
 
@@ -56,6 +59,7 @@ func _ready() -> void:
 	var sub := UiKit.label("The happiest city in Egkomi after %d rounds." % _gs.ROUNDS, 18, UiKit.MUTED)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(sub)
+	v.add_child(_build_circumstance_recap())
 	for i in _order:
 		var row := _build_row(i)
 		v.add_child(row)
@@ -94,6 +98,20 @@ func _headline_text() -> String:
 	return "%s wins!" % winners[0] if winners.size() == 1 else "%s share the win!" % " and ".join(PackedStringArray(winners))
 
 
+## The hidden circumstances that shaped this game, in the order they were revealed.
+func _build_circumstance_recap() -> Control:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 16)
+	for id in _gs.revealed:
+		var chip := HBoxContainer.new()
+		chip.add_theme_constant_override("separation", 6)
+		chip.add_child(UiKit.icon(CircumstanceDefs.art_path(id), 34))
+		chip.add_child(UiKit.label(CircumstanceDefs.title(id), 15, UiKit.MUTED, "body_bold"))
+		row.add_child(chip)
+	return row
+
+
 static func ordinal(n: int) -> String:
 	return PLACES[clampi(n - 1, 0, PLACES.size() - 1)]
 
@@ -121,6 +139,13 @@ func _build_row(i: int) -> Control:
 	nv.add_child(UiKit.label(p.name, 24, col.lightened(0.25), "display_bold"))
 	nv.add_child(UiKit.label("%d of %d citizens happy, %d loan%s, %d gold left" % [r["happy_citizens"], r["citizens"], r["loans"], "" if r["loans"] == 1 else "s", p.money], 15, UiKit.MUTED))
 	h.add_child(nv)
+	var drawn: int = _gs.cards_drawn_by(i).size()
+	if drawn > 0:
+		var cards_btn := UiKit.button("%d cards" % drawn, "ghost", 16)
+		cards_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		cards_btn.tooltip_text = "See every event and penalty card %s drew, and what each one did." % p.name
+		cards_btn.pressed.connect(func(): cards_pressed.emit(i))
+		h.add_child(cards_btn)
 	h.add_child(UiKit.label(Describe.points(r["total"]), 32, UiKit.LIMESTONE, "display_bold"))
 	return rp
 

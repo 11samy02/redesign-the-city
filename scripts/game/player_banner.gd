@@ -6,6 +6,9 @@ const Widgets = preload("res://scripts/ui/widgets.gd")
 const Describe = preload("res://scripts/ui/describe.gd")
 const Tooltip = preload("res://scripts/ui/tooltip.gd")
 const Bot = preload("res://scripts/core/bot.gd")
+const GameState = preload("res://scripts/core/game_state.gd")
+const CardDefs = preload("res://scripts/core/card_defs.gd")
+const Scoring = preload("res://scripts/core/scoring.gd")
 
 const COIN := "res://assets/ui/coin.svg"
 
@@ -23,9 +26,9 @@ var _gauge: Widgets.PollutionGauge
 
 func _init(tooltip: Tooltip) -> void:
 	_tooltip = tooltip
-	add_theme_stylebox_override("panel", UiKit.box(UiKit.PANEL, 18, 1, UiKit.LINE, 14))
+	add_theme_stylebox_override("panel", UiKit.box(UiKit.PANEL, 18, 1, UiKit.LINE, 10))
 	var bv := VBoxContainer.new()
-	bv.add_theme_constant_override("separation", 12)
+	bv.add_theme_constant_override("separation", 8)
 	add_child(bv)
 	bv.add_child(_build_top_row())
 	bv.add_child(_build_stats())
@@ -47,7 +50,7 @@ func show_player(p, result: Dictionary) -> void:
 	create_tween().tween_property(_gauge, "level", float(poll), 0.5).set_trans(Tween.TRANS_CUBIC)
 	_stat_values["citizens"].text = "%d of %d" % [result["happy_citizens"], result["citizens"]]
 	_stat_values["score"].text = Describe.points(result["total"])
-	_stat_notes["score"].text = "Score now" if p.loans == 0 else "Score now, %d loan%s" % [p.loans, "" if p.loans == 1 else "s"]
+	_stat_notes["score"].text = "Score" if p.loans == 0 else "Score now, %d loan%s" % [p.loans, "" if p.loans == 1 else "s"]
 	_stat_values["score"].add_theme_color_override("font_color", UiKit.OLIVE if result["total"] > 0 else (UiKit.HEAT if result["total"] < 0 else UiKit.LIMESTONE))
 	_stat_values["extras"].text = "%d left" % p.free_roads
 
@@ -87,6 +90,9 @@ func _build_top_row() -> Control:
 	names.add_theme_constant_override("separation", -2)
 	_name_label = UiKit.label("", 30, UiKit.LIMESTONE, "display_bold")
 	_sub_label = UiKit.label("", 15, UiKit.MUTED)
+	for l in [_name_label, _sub_label]:
+		l.clip_text = true
+		l.custom_minimum_size.x = 150
 	names.add_child(_name_label)
 	names.add_child(_sub_label)
 	top.add_child(names)
@@ -100,28 +106,29 @@ func _build_money() -> Control:
 	money.add_theme_constant_override("separation", 6)
 	_money_icon = UiKit.icon(COIN, 44)
 	money.add_child(_money_icon)
-	_money_label = UiKit.label("20", 40, UiKit.GOLD, "display_bold")
+	_money_label = UiKit.label(str(GameState.START_MONEY), 40, UiKit.GOLD, "display_bold")
 	money.add_child(_money_label)
 	money.mouse_filter = Control.MOUSE_FILTER_PASS
-	money.mouse_entered.connect(func(): _tooltip.show_text("Gold", ["Pay for tiles from the construction site.", "Loans add 10 gold but cost 2 points at the end."], money.get_global_rect(), COIN))
+	money.custom_minimum_size.x = 140
+	money.mouse_entered.connect(func(): _tooltip.show_text("Gold", ["Pay for tiles from the construction site.", "A loan adds %d gold but costs points at the end, and more with every further loan." % GameState.LOAN_AMOUNT], money.get_global_rect(), COIN))
 	money.mouse_exited.connect(_tooltip.hide_tip)
 	return money
 
 
 func _build_stats() -> Control:
 	var stats := HBoxContainer.new()
-	stats.add_theme_constant_override("separation", 8)
+	stats.add_theme_constant_override("separation", 6)
 	stats.add_child(_stat("pollution", "Pollution", "res://assets/ui/pollution.svg", [
-		"Starts at 10. Each park lowers it by 3, each trees tile by 1.",
-		"0 to 5: no effect. 6 to 8: -1 happiness. 9 to 10: -2 happiness for every citizen."]))
+		"Starts at %d. Each park lowers it by 3, each trees tile by 1." % Scoring.START_POLLUTION,
+		"Below 8: no effect. 8 to 12: -1 happiness. 13 and up: -2 happiness for every citizen."]))
 	stats.add_child(_stat("citizens", "Happy citizens", "res://assets/ui/citizen.svg", [
-		"Citizens live in apartments. A happy citizen is above 0.",
-		"Hover an apartment to see what raises or lowers its mood."]))
+		"Citizens live in homes. A happy citizen is above 0.",
+		"Hover a home to see what each citizen needs and what lowers their mood."]))
 	stats.add_child(_stat("score", "Score now", "res://assets/ui/trophy.svg", [
 		"What your city would score if the game ended now:",
-		"each citizen's happiness, minus 2 per loan."]))
+		"each citizen's happiness, minus the points your loans cost."]))
 	stats.add_child(_stat("extras", "Free roads", "res://assets/tiles/road_15.svg", [
-		"You get 2 free roads for the whole game.",
+		"You get %d free roads for the whole game." % GameState.FREE_ROADS,
 		"Place them on any empty lot during your turns (R)."]))
 	return stats
 
@@ -130,20 +137,23 @@ func _stat(key: String, caption: String, icon_path: String, help: Array) -> Cont
 	var pc := PanelContainer.new()
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pc.add_theme_stylebox_override("panel", UiKit.box(UiKit.PANEL_HI, 12, 0, Color.TRANSPARENT, 8))
+	pc.size_flags_stretch_ratio = 1.0
 	pc.mouse_filter = Control.MOUSE_FILTER_PASS
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 8)
-	h.add_child(UiKit.icon(icon_path, 28))
 	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_theme_constant_override("separation", 0)
 	var cap := UiKit.label(caption, 13, UiKit.MUTED)
+	var val := UiKit.label("", 18, UiKit.LIMESTONE, "display_bold")
+	for l in [cap, val]:
+		l.clip_text = true
+		l.custom_minimum_size.x = 90
 	v.add_child(cap)
-	var val := UiKit.label("", 19, UiKit.LIMESTONE, "display_bold")
 	v.add_child(val)
 	_stat_notes[key] = cap
 	if key == "pollution":
 		_gauge = Widgets.PollutionGauge.new()
-		_gauge.custom_minimum_size = Vector2(70, 6)
+		_gauge.custom_minimum_size = Vector2(90, 6)
 		v.add_child(_gauge)
 	h.add_child(v)
 	pc.add_child(h)

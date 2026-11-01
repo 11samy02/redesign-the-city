@@ -9,9 +9,15 @@ const TileView = preload("res://scripts/ui/tile_view.gd")
 const MatView = preload("res://scripts/ui/mat_view.gd")
 const Tooltip = preload("res://scripts/ui/tooltip.gd")
 const Bot = preload("res://scripts/core/bot.gd")
+const Scoring = preload("res://scripts/core/scoring.gd")
 
 signal back_pressed
 signal cities_pressed
+
+## The longest texts that appear after a pick. Their space is reserved from the start.
+const LEGEND_LONGEST := "Green tiles gain points with this change. Gold tiles keep what holds them back."
+const DETAIL_LONGEST := "Helps 99 homes and 9 unused places"
+const VERDICT_LONGEST := "Accessibility is worth up to 99. Walkability holds the most back: up to 99 points."
 
 var _gs
 var _results: Array
@@ -137,6 +143,19 @@ func _card_style(card: PanelContainer, bg: Color, border: Color, width: int) -> 
 	card.add_theme_stylebox_override("panel", UiKit.box(bg, 18, width, border, 14))
 
 
+## Wraps a label so its slot is as big as `worst` would be. Text that appears later (after a
+## pick) then never makes the slot grow, so nothing around it shifts.
+func _reserve(real: Label, worst: String) -> Control:
+	var box := MarginContainer.new()
+	var ghost: Label = real.duplicate()
+	ghost.text = worst
+	ghost.modulate.a = 0.0
+	ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(real)
+	box.add_child(ghost)
+	return box
+
+
 func _fade_in(c: Control) -> void:
 	c.modulate.a = 0.0
 	create_tween().tween_property(c, "modulate:a", 1.0, 0.3)
@@ -203,7 +222,7 @@ func _show_stage(i: int) -> void:
 ## The planner's city card: avatar and name, the mat with tile tooltips and a hint line.
 func _build_city_panel(p, r: Dictionary) -> Dictionary:
 	var col := UiKit.player_color(p.color_index)
-	var cell := clampf((get_viewport_rect().size.y - 340.0) / 4.0 - 8.0, 66.0, 112.0)
+	var cell := clampf((get_viewport_rect().size.y - 340.0) / 7.0 - 8.0, 44.0, 90.0)
 	var pc := PanelContainer.new()
 	pc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var psb := UiKit.box(UiKit.PANEL, 24, 0, Color.TRANSPARENT, 18)
@@ -239,20 +258,29 @@ func _build_city_panel(p, r: Dictionary) -> Dictionary:
 	var legend := UiKit.label("Hover a home to see what holds it back.", 16, UiKit.MUTED)
 	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	legend.custom_minimum_size.x = mv.custom_minimum_size.x
-	lv.add_child(legend)
+	lv.add_child(_reserve(legend, LEGEND_LONGEST))
 	return {"panel": pc, "mat": mv, "legend": legend}
 
 
-## Every home is at +3 and every amenity is used: the only change left is more homes.
+## Every home is at +5 and every place is used: the only change left is more homes.
 func _show_nothing_to_fix(i: int, p, who: String, prompt: Label, sub: Label, legend: Label) -> void:
 	var empty := 0
 	for cell_tile in p.cells:
 		empty += 1 if cell_tile == null else 0
-	prompt.text = "Every home in %s city is at +3." % who
 	prompt.add_theme_color_override("font_color", UiKit.OLIVE)
-	sub.text = "No change makes a home happier. The only points left are in new homes: %s." % (
-		"%d empty lot%s could house more citizens" % [empty, "" if empty == 1 else "s"] if empty > 0 else "every lot is built")
-	legend.text = "Every home is at the happiness cap."
+	var loans: int = _results[i]["loans"]
+	if empty == 0 and loans == 0:
+		prompt.text = "A perfect city!"
+		sub.text = "Every home is at +5, every place is used and every lot is built. No change could add a single point to %s city." % who
+		legend.text = "Nothing holds this city back."
+	else:
+		prompt.text = "Every home in %s city is at +5." % who
+		sub.text = "No change makes a home happier."
+		if empty > 0:
+			sub.text += " The only points left are in new homes: %d empty lot%s could house more citizens." % [empty, "" if empty == 1 else "s"]
+		if loans > 0:
+			sub.text += " Loans cost %d points." % _results[i]["loan_penalty"]
+		legend.text = "Every home is at the happiness cap."
 	_picked[i] = ""
 	_next_btn.disabled = false
 
@@ -285,10 +313,12 @@ func _build_verdict(ui: Dictionary) -> Control:
 	var vp := PanelContainer.new()
 	vp.custom_minimum_size.y = 86
 	vp.modulate.a = 0.0
+	# same padding and border as the revealed look, so the panel never changes size
+	vp.add_theme_stylebox_override("panel", UiKit.box(Color.TRANSPARENT, 18, 2, Color.TRANSPARENT, 16))
 	var vl := UiKit.label("", 22, UiKit.LIMESTONE, "display_bold")
 	vl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	vp.add_child(vl)
+	vp.add_child(_reserve(vl, VERDICT_LONGEST))
 	ui["verdict"] = vp
 	ui["verdict_label"] = vl
 	return vp
@@ -301,9 +331,12 @@ func _choice_card(t: String, locked: bool) -> Dictionary:
 	card.custom_minimum_size = Vector2(333, 120)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_card_style(card, UiKit.PANEL, UiKit.LINE, 2)
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 6)
+	card.add_child(body)
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 14)
-	card.add_child(h)
+	body.add_child(h)
 	var ic := UiKit.icon(d["icon"], 52)
 	ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(ic)
@@ -315,14 +348,6 @@ func _choice_card(t: String, locked: bool) -> Dictionary:
 	var fix := UiKit.label(d["fix"], 16, UiKit.MUTED)
 	fix.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	tv.add_child(fix)
-	# invisible until the reveal, but it keeps its space so the cards never change size
-	var detail := UiKit.label("0 homes", 15, UiKit.LIMESTONE, "body_bold")
-	detail.modulate.a = 0.0
-	tv.add_child(detail)
-	var tag := UiKit.chip("Most points", UiKit.OLIVE, UiKit.INK_DEEP, 13)
-	tag.modulate.a = 0.0
-	tag.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	tv.add_child(tag)
 	h.add_child(tv)
 	var cv := VBoxContainer.new()
 	cv.add_theme_constant_override("separation", -6)
@@ -336,6 +361,21 @@ func _choice_card(t: String, locked: bool) -> Dictionary:
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cv.add_child(cap)
 	h.add_child(cv)
+	# both invisible until the reveal; they sit on the full card width so a long line never
+	# squeezes the text column, and their space is reserved so the cards never change size
+	var foot := HBoxContainer.new()
+	foot.add_theme_constant_override("separation", 10)
+	var detail := UiKit.label("0 homes", 15, UiKit.LIMESTONE, "body_bold")
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	detail.modulate.a = 0.0
+	var detail_slot := _reserve(detail, DETAIL_LONGEST)
+	detail_slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot.add_child(detail_slot)
+	var tag := UiKit.chip("Most points", UiKit.OLIVE, UiKit.INK_DEEP, 13)
+	tag.modulate.a = 0.0
+	tag.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	foot.add_child(tag)
+	body.add_child(foot)
 	var hit := Button.new()
 	hit.flat = true
 	hit.focus_mode = Control.FOCUS_NONE
@@ -389,7 +429,7 @@ func _reveal_cards(r: Dictionary, chosen: String, most: int, right: bool, ui: Di
 		if homes > 0:
 			parts.append("%d home%s" % [homes, "" if homes == 1 else "s"])
 		if t == "Accessibility" and not unused.is_empty():
-			parts.append("%d unused amenit%s" % [unused.size(), "y" if unused.size() == 1 else "ies"])
+			parts.append("%d unused place%s" % [unused.size(), "" if unused.size() == 1 else "s"])
 		c["detail"].text = "Helps " + " and ".join(PackedStringArray(parts)) if not parts.is_empty() else "Nothing to gain here"
 		c["detail"].add_theme_color_override("font_color", UiKit.LIMESTONE if k > 0 else UiKit.MUTED)
 		create_tween().tween_property(c["counts"], "modulate:a", 1.0, 0.3)
@@ -418,14 +458,26 @@ func _mark_chosen(c: Dictionary, right: bool) -> void:
 	c["tag"].modulate.a = 1.0
 
 
+## The change that would help a home most: the chosen one when it helps any citizen there.
+func _home_improve(a: Dictionary, chosen: String) -> String:
+	var first := ""
+	for m in a["members"]:
+		if m["improve"] == chosen:
+			return chosen
+		if first == "" and m["improve"] != "":
+			first = m["improve"]
+	return first
+
+
 ## On the city: green tiles gain with this change, gold ones stay as they are.
 func _reveal_city(r: Dictionary, chosen: String, n: int, ui: Dictionary) -> void:
 	var mv: MatView = ui["mat"]
 	var map := {}
 	var spots: Array = []
 	for a in r["apartments"]:
-		if a["improve"] != "":
-			spots.append([a["index"], a["improve"]])
+		var improve := _home_improve(a, chosen)
+		if improve != "":
+			spots.append([a["index"], improve])
 	for u in r["unused"]:
 		spots.append([u, "Accessibility"])
 	var marks := 0

@@ -142,9 +142,9 @@ func _dio_tile(ch: String) -> Variant:
 		"s": return TileDefs.make(TileDefs.Kind.APT_S)
 		"m": return TileDefs.make(TileDefs.Kind.APT_M)
 		"l": return TileDefs.make(TileDefs.Kind.APT_L)
-		"c": return TileDefs.make(TileDefs.Kind.AMENITY, 0)
-		"h": return TileDefs.make(TileDefs.Kind.AMENITY, 1)
-		"k": return TileDefs.make(TileDefs.Kind.AMENITY, 3)
+		"c": return TileDefs.make(TileDefs.Kind.COFFEE_SHOP)
+		"h": return TileDefs.make(TileDefs.Kind.CLINIC)
+		"k": return TileDefs.make(TileDefs.Kind.SUPERMARKET)
 	return null
 
 
@@ -320,7 +320,7 @@ func _start() -> void:
 			k += 1
 		seen[n.to_lower()] = true
 		Game.seats[i]["name"] = n
-	Sfx.play("turn")
+	Sfx.play("start")
 	Game.new_game()
 	Game.goto(Game.GAME_SCENE)
 

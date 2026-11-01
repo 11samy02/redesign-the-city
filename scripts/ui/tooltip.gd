@@ -4,12 +4,15 @@ extends PanelContainer
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
 const Describe = preload("res://scripts/ui/describe.gd")
+const Roles = preload("res://scripts/core/roles.gd")
 
-const WIDTH := 330.0
+const WIDTH := 300.0
 
 var _box: VBoxContainer
 var _tw: Tween
 var _request := 0
+## While a bot plays, hover hints stay hidden (the player is only watching).
+var muted := false
 
 
 func _init() -> void:
@@ -32,7 +35,9 @@ func _clear() -> void:
 		c.queue_free()
 
 
-func show_tile(tile: Dictionary, anchor: Rect2, lines: Array, show_cost: bool, road_mask := 15) -> void:
+func show_tile(tile: Dictionary, anchor: Rect2, lines: Array, show_cost: bool, road_mask := 15, cost := -1) -> void:
+	if muted:
+		return
 	_clear()
 	var info := TileDefs.info(tile["kind"])
 	var head := HBoxContainer.new()
@@ -43,7 +48,12 @@ func show_tile(tile: Dictionary, anchor: Rect2, lines: Array, show_cost: bool, r
 	names.add_child(UiKit.label(TileDefs.display_name(tile), 24, UiKit.LIMESTONE, "display_bold"))
 	var cat: String = info["category"]
 	var chip_row := HBoxContainer.new()
-	chip_row.add_child(UiKit.chip(cat if tile["kind"] != TileDefs.Kind.AMENITY else "Amenity", UiKit.CATEGORY_COLORS[cat]))
+	chip_row.add_theme_constant_override("separation", 6)
+	chip_row.add_child(UiKit.chip(cat, UiKit.CATEGORY_COLORS[cat]))
+	if TileDefs.is_home(tile["kind"]):
+		var who := TileDefs.members(tile)
+		if not who.is_empty():
+			chip_row.add_child(UiKit.chip(TileDefs.household_name(tile), Roles.role_color(who[0]).darkened(0.25)))
 	names.add_child(chip_row)
 	head.add_child(names)
 	_box.add_child(head)
@@ -51,32 +61,32 @@ func show_tile(tile: Dictionary, anchor: Rect2, lines: Array, show_cost: bool, r
 	if show_cost:
 		var cost_row := HBoxContainer.new()
 		cost_row.add_theme_constant_override("separation", -6)
-		for k in info["cost"]:
-			cost_row.add_child(UiKit.icon("res://assets/ui/coin.svg", 26))
+		var price := TileDefs.tile_cost(tile) if cost < 0 else cost
+		cost_row.add_child(UiKit.icon("res://assets/ui/coin.svg", 26))
 		var spacer := Control.new()
 		spacer.custom_minimum_size.x = 16
 		cost_row.add_child(spacer)
-		cost_row.add_child(UiKit.label("%d gold" % info["cost"], 20, UiKit.GOLD, "display_bold"))
+		var shown := "%d gold" % price
+		cost_row.add_child(UiKit.label(shown, 20, UiKit.GOLD, "display_bold"))
 		_box.add_child(cost_row)
 
-	var eff := UiKit.label(Describe.effect_text(tile), 16)
-	eff.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	eff.custom_minimum_size.x = WIDTH
-	_box.add_child(eff)
+	# a home says who lives in it in the lines below, so it needs no sentence of its own
+	if not TileDefs.is_home(tile["kind"]):
+		var eff := UiKit.label(Describe.effect_text(tile), 16)
+		eff.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		eff.custom_minimum_size.x = WIDTH
+		_box.add_child(eff)
 
 	if not lines.is_empty():
 		_add_rule()
 		_add_rich(lines)
 
-	var obj := HBoxContainer.new()
-	obj.add_theme_constant_override("separation", 6)
-	for o in info["objectives"]:
-		obj.add_child(UiKit.chip("%s %s" % [o, UiKit.OBJECTIVE_SHORT[o]], UiKit.PANEL_HI, UiKit.MUTED, 13))
-	_box.add_child(obj)
 	_present(anchor)
 
 
 func show_text(title: String, lines: Array, anchor: Rect2, icon_path := "") -> void:
+	if muted:
+		return
 	_clear()
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 12)

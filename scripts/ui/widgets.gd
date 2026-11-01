@@ -69,10 +69,10 @@ class RoundTracker extends Control:
 		set(v):
 			current = v
 			queue_redraw()
-	var total := 4
+	var total := 8
 
 	func _init() -> void:
-		custom_minimum_size = Vector2(200, 40)
+		custom_minimum_size = Vector2(216, 40)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	func _draw() -> void:
@@ -84,39 +84,27 @@ class RoundTracker extends Control:
 		var f := UiKit.font("display_bold")
 		for k in total:
 			var c := Vector2(20 + step * k, y)
-			var r := 15.0 if k + 1 == current else 11.0
+			var r := 12.0 if k + 1 == current else 9.0
 			var col: Color = UiKit.GOLD if k + 1 < current else (UiKit.BOUG if k + 1 == current else UiKit.PANEL_HI)
 			draw_circle(c, r + 3, UiKit.INK_DEEP)
 			draw_circle(c, r, col)
 			var t := str(k + 1)
-			var fs := 17 if k + 1 == current else 13
+			var fs := 16 if k + 1 == current else 12
 			var w := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			draw_string(f, c + Vector2(-w / 2.0, fs * 0.36), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiKit.INK_DEEP if k + 1 < current else UiKit.LIMESTONE)
 
 
-## Night-ink table with a soft lamp glow and a faint tile lattice.
+## The plain dark background of every screen.
 class Backdrop extends Control:
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		resized.connect(queue_redraw)
 
+	## A flat dark blue with a very soft fade towards the bottom. Nothing else, so the game is what you look at.
 	func _draw() -> void:
-		draw_rect(Rect2(Vector2.ZERO, size), UiKit.INK)
-		var c := Vector2(size.x * 0.5, size.y * 0.42)
-		var maxr := size.length() * 0.55
-		for k in 14:
-			var t := float(k) / 14.0
-			draw_circle(c, maxr * (1.0 - t), Color(UiKit.PANEL, 0.06 + t * 0.02))
-		var step := 48.0
-		var col := Color(1, 1, 1, 0.025)
-		var y := 0.0
-		while y < size.y:
-			var x := fmod(y / step, 2.0) * step * 0.5
-			while x < size.x:
-				var p := Vector2(x, y)
-				draw_colored_polygon(PackedVector2Array([p + Vector2(0, -4), p + Vector2(4, 0), p + Vector2(0, 4), p + Vector2(-4, 0)]), col)
-				x += step
-			y += step
+		var top := UiKit.INK
+		var bottom := UiKit.INK_DEEP
+		draw_polygon(PackedVector2Array([Vector2.ZERO, Vector2(size.x, 0), size, Vector2(0, size.y)]), PackedColorArray([top, top, bottom, bottom]))
 
 
 ## One of the two "bought this turn" slots in the action bar.

@@ -3,19 +3,26 @@ extends Control
 ## live badges (gold cost, citizen happiness, green effects) and animates hover/pop.
 
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
+const Roles = preload("res://scripts/core/roles.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
 
 signal pressed(view)
 signal right_pressed(view)
 signal hovered(view, inside: bool)
 
-enum Mode { SHOP, MAT, MINI }
+## STOCK is a free tile waiting in the action bar: shop-like hover and count badge, "Free" instead of a price.
+enum Mode { SHOP, MAT, MINI, STOCK }
 
 var mode := Mode.SHOP
 var index := -1
 var tile = null
 var road_mask := 15
-var removed := false
+## How many identical tiles this shop stack still holds (shop only). More than 1 shows an "Nx" badge.
+var stack_count := 0
+## A shop stack with nothing left: drawn faded and not clickable.
+var sold_out := false
+## What the current planner pays for this shop tile (a card can change it); -1 means the normal price.
+var price := -1
 var affordable := true
 var selected := false:
 	set(v):
@@ -61,6 +68,8 @@ var dim := 0.0:
 		queue_redraw()
 
 var _hover := false
+## Off while a bot plays: no lift, no sound and no hover signal.
+var hover_enabled := true
 var _pulse := 0.0
 var _tweens := {}
 
@@ -91,12 +100,20 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _on_enter() -> void:
+	if not hover_enabled:
+		return
 	_hover = true
-	if tile != null and mode == Mode.SHOP and not selected:
+	if tile != null and (mode == Mode.SHOP or mode == Mode.STOCK) and not selected:
 		_tween_to("lift", 5.0, 0.15)
-		Sfx.play("hover")
+		_sfx("hover")
 	hovered.emit(self, true)
 	queue_redraw()
+
+
+## Plays a sound through the Sfx autoload when there is one (tests run without autoloads).
+func _sfx(sound: String) -> void:
+	if is_inside_tree() and get_tree().root.has_node("Sfx"):
+		get_tree().root.get_node("Sfx").play(sound)
 
 
 func _on_exit() -> void:
@@ -161,7 +178,7 @@ func _draw() -> void:
 		# drop shadow grows as the tile lifts
 		var sh := Rect2(r.position + Vector2(0, 3 + lift * 0.5), r.size).grow(-1 + lift * 0.2)
 		draw_style_box(_sb("shadow", Color(0, 0, 0, 0.34), radius), sh)
-		draw_texture_rect(UiKit.tex(texture_path()), art, false)
+		draw_texture_rect(UiKit.tex(texture_path()), art, false, Color(1, 1, 1, 0.3) if sold_out else Color.WHITE)
 		if shade_dirs != 0 and tile["kind"] == TileDefs.Kind.ROAD:
 			_draw_shade(s, radius)
 		if highlight.a > 0.0:
@@ -173,9 +190,18 @@ func _draw() -> void:
 		if selected:
 			draw_style_box(_sb("sel", Color(0, 0, 0, 0), radius + 3, 4, UiKit.BOUG), art.grow(4))
 		if mode == Mode.SHOP:
-			_draw_cost(art)
+			if sold_out:
+				_draw_sold_out(art, radius)
+			else:
+				_draw_cost(art)
+				_draw_stack_count(art)
+				_draw_household(art, 0.19, true)
+		elif mode == Mode.STOCK:
+			_draw_stack_count(art)
+			_draw_free_tag(art)
 		elif mode == Mode.MAT:
 			_draw_mat_badges(art)
+			_draw_household(art, 0.2, false)
 
 	if keyboard_focus:
 		var a := 0.75 + 0.25 * sin(Time.get_ticks_msec() / 160.0)
@@ -197,13 +223,6 @@ func _draw_shade(s: Vector2, radius: int) -> void:
 func _draw_empty(r: Rect2, radius: int) -> void:
 	if mode == Mode.SHOP:
 		draw_style_box(_sb("socket", Color(UiKit.INK_DEEP, 0.7), radius, 2, Color(UiKit.LINE, 0.6)), r)
-		if removed:
-			# hatched "closed lot" for the fewer-players rule
-			var step := r.size.x / 6.0
-			for i in range(1, 6):
-				var o := step * i
-				draw_line(r.position + Vector2(o, 4), r.position + Vector2(4, o), Color(UiKit.LINE, 0.55), 2.0, true)
-				draw_line(r.end - Vector2(o, 4), r.end - Vector2(4, o), Color(UiKit.LINE, 0.55), 2.0, true)
 		return
 	draw_texture_rect(UiKit.tex("res://assets/tiles/lot.svg"), r, false, Color(1, 1, 1, 0.92))
 	if highlight.a > 0.0:
@@ -217,8 +236,59 @@ func _draw_empty(r: Rect2, radius: int) -> void:
 		draw_texture_rect(UiKit.tex(TileDefs.art_path(ghost_tile, ghost_mask)), gr, false, Color(1, 1, 1, 0.78))
 
 
+## "12x" sitting on the top-right corner of a shop stack that holds more than one tile, half
+## outside the tile so it never covers the citizen icons.
+func _draw_stack_count(art: Rect2) -> void:
+	if stack_count <= 1:
+		return
+	var f := UiKit.font("display_bold")
+	var fs := int(art.size.x * 0.18)
+	var t := "%dx" % stack_count
+	var w := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 10
+	var pill := Rect2(Vector2(art.end.x - w + 3, art.position.y - fs * 0.55), Vector2(w, fs * 1.35))
+	draw_style_box(_sb("count", Color(UiKit.INK_DEEP, 0.96), int(pill.size.y / 2), 1, Color(UiKit.LINE, 0.8)), pill)
+	draw_string(f, Vector2(pill.position.x + 5, pill.position.y + pill.size.y / 2 + fs * 0.36), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiKit.LIMESTONE)
+
+
+## Gold "Free" pill along the bottom edge, where a shop tile shows its price.
+func _draw_free_tag(art: Rect2) -> void:
+	var f := UiKit.font("display_bold")
+	var fs := int(art.size.x * 0.21)
+	var t := "Free"
+	var w := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 14
+	var pill := Rect2(Vector2(art.get_center().x - w / 2.0, art.end.y - fs * 1.4 - 3), Vector2(w, fs * 1.4))
+	draw_style_box(_sb("free", UiKit.GOLD, int(pill.size.y / 2)), pill)
+	draw_string(f, Vector2(pill.position.x + 7, pill.position.y + pill.size.y / 2 + fs * 0.36), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiKit.INK)
+
+
+func _draw_sold_out(art: Rect2, radius: int) -> void:
+	draw_style_box(_sb("soldout", Color(UiKit.INK_DEEP, 0.55), radius), art)
+	var f := UiKit.font("display_bold")
+	var fs := int(art.size.x * 0.17)
+	var t := "Sold out"
+	var w := f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	draw_string(f, Vector2(art.get_center().x - w / 2.0, art.get_center().y + fs * 0.35), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(UiKit.LIMESTONE, 0.85))
+
+
+## Who lives here: one small round role icon per citizen. In the shop they sit in the top-left
+## corner (the price takes the bottom and the stack count the top-right); on the mat, bottom-left.
+func _draw_household(art: Rect2, size_factor: float, top: bool) -> void:
+	if tile == null or not TileDefs.is_home(tile["kind"]):
+		return
+	var members := TileDefs.members(tile)
+	var d := art.size.x * size_factor
+	var step := d * (0.62 if top else 0.72)
+	var w := d + step * (members.size() - 1) + 6
+	var y := art.position.y + 3 if top else art.end.y - d - 7
+	var pill := Rect2(Vector2(art.position.x + 3, y), Vector2(w, d + 4))
+	draw_style_box(_sb("house", Color(UiKit.INK_DEEP, 0.9), int(pill.size.y / 2)), pill)
+	for k in members.size():
+		draw_texture_rect(UiKit.tex(Roles.DEFS[members[k]]["icon"]), Rect2(pill.position + Vector2(3 + k * step, 2), Vector2(d, d)), false)
+
+
 func _draw_cost(art: Rect2) -> void:
-	var cost := TileDefs.cost(tile["kind"])
+	var normal := TileDefs.tile_cost(tile)
+	var cost := normal if price < 0 else price
 	var f := UiKit.font("display_bold")
 	var fs := int(art.size.x * 0.24)
 	var coin := art.size.x * 0.3
@@ -226,6 +296,10 @@ func _draw_cost(art: Rect2) -> void:
 	draw_style_box(_sb("pill", Color(UiKit.INK_DEEP, 0.88), int(coin / 2)), pill)
 	draw_texture_rect(UiKit.tex("res://assets/ui/coin.svg"), Rect2(pill.position, Vector2(coin, coin)), false)
 	var col := UiKit.GOLD if affordable else UiKit.HEAT
+	if cost < normal:
+		col = UiKit.OLIVE
+	elif cost > normal:
+		col = UiKit.HEAT
 	var pos := Vector2(pill.position.x + coin + 1, pill.position.y + coin * 0.5 + fs * 0.36)
 	draw_string(f, pos, str(cost), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 
@@ -234,16 +308,17 @@ func _draw_mat_badges(art: Rect2) -> void:
 	var f := UiKit.font("display_bold")
 	var fs := int(art.size.x * 0.15)
 	if apartment_info != null:
-		var h: int = apartment_info["happiness"]
-		var n: int = apartment_info["citizens"]
+		var members: Array = apartment_info["members"]
+		var n := members.size()
 		var fr := art.size.x * 0.075
+		var sp: int = apartment_info["sp"]
 		var w := n * fr * 2.3 + fs * 1.4 + 12
 		var pill := Rect2(art.position + Vector2(6, 6), Vector2(w, fr * 2 + 8))
 		draw_style_box(_sb("face", Color(UiKit.INK_DEEP, 0.88), int(pill.size.y / 2)), pill)
 		for k in n:
-			draw_face(self, pill.position + Vector2(6 + fr + k * fr * 2.3, pill.size.y / 2), fr, h)
-		var txt := ("+%d" % h) if h > 0 else str(h)
-		var col := face_color(h)
+			draw_face(self, pill.position + Vector2(6 + fr + k * fr * 2.3, pill.size.y / 2), fr, members[k]["happiness"])
+		var txt := ("+%d" % sp) if sp > 0 else str(sp)
+		var col := face_color(signi(sp))
 		draw_string(f, Vector2(pill.position.x + 8 + n * fr * 2.3, pill.position.y + pill.size.y / 2 + fs * 0.36), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)
 	elif badge_text != "":
 		var w := f.get_string_size(badge_text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 16

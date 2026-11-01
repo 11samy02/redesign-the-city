@@ -474,41 +474,90 @@ KERB = "#B7AA90"
 MARK = "#F3E7C4"
 
 
-def road(mask):
+# Street types: surface gradient, kerb, lane marking and how the dashes are drawn.
+STREET_STYLES = {
+    "road": {"asph": ("#56606C", "#48505B"), "kerb": KERB, "mark": MARK, "dash": "16 12", "width": 5},
+    "shaded": {"asph": ("#56606C", "#48505B"), "kerb": KERB, "mark": MARK, "dash": "16 12", "width": 5},
+    "pedestrian": {"asph": ("#E6D5AD", "#D4BF92"), "kerb": "#F6EEDC", "mark": "#B9A272", "dash": "0.1 14", "width": 6},
+    "bike": {"asph": ("#4F906D", "#3E7A5A"), "kerb": KERB, "mark": "#F4F1E4", "dash": "16 12", "width": 4},
+}
+
+
+def bike_glyph(cx, cy):
+    """Small white bicycle painted on the lane."""
+    w = f'stroke="#F4F1E4" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"'
+    return (
+        f'<g {w} opacity="0.95"><circle cx="{cx-17}" cy="{cy+8}" r="10"/><circle cx="{cx+17}" cy="{cy+8}" r="10"/>'
+        f'<path d="M{cx-17} {cy+8} L{cx-4} {cy-10} L{cx+10} {cy-10} L{cx+17} {cy+8} M{cx-4} {cy-10} L{cx+4} {cy+8} L{cx-17} {cy+8} M{cx+10} {cy-10} L{cx+8} {cy-16} L{cx+16} {cy-16}"/></g>'
+    )
+
+
+def bollards(mask, lo, hi):
+    """Pedestrian street: a pair of posts at the edge of every open arm."""
+    out = ""
+    spots = []
+    if mask & 1: spots += [(lo + 10, 20), (hi - 10, 20)]
+    if mask & 4: spots += [(lo + 10, 236), (hi - 10, 236)]
+    if mask & 2: spots += [(236, lo + 10), (236, hi - 10)]
+    if mask & 8: spots += [(20, lo + 10), (20, hi - 10)]
+    for x, y in spots:
+        out += f'<circle cx="{x}" cy="{y+2}" r="7" fill="{SHADOW}" opacity="0.3"/><circle cx="{x}" cy="{y}" r="6.5" fill="#6B7380"/><circle cx="{x-1.5}" cy="{y-1.5}" r="3.5" fill="#A9B1BD"/>'
+    return out
+
+
+def canopy(cx, cy):
+    """Tree crown spilling over the road edge, with a soft shadow on the surface."""
+    return (
+        f'<circle cx="{cx+6}" cy="{cy+8}" r="40" fill="{SHADOW}" opacity="0.22"/>'
+        + round_tree(cx, cy, 38, LEAF, LEAF_DARK, LEAF_LIGHT)
+        + f'<circle cx="{cx+10}" cy="{cy+8}" r="6" fill="{LEAF_LIGHT}" opacity="0.6"/>'
+    )
+
+
+def road(mask, style="road"):
     """mask bits: 1 = north, 2 = east, 4 = south, 8 = west."""
+    st = STREET_STYLES[style]
+    kerb, mark = st["kerb"], st["mark"]
+    corners = [(42, 42), (214, 42), (42, 214), (214, 214)]
     d, b = frame("road")
-    d += lin("asph", "#56606C", "#48505B")
+    d = '<clipPath id="inner"><rect x="10" y="10" width="236" height="236" rx="22"/></clipPath>' + d
+    d += lin("asph", *st["asph"])
     lo, hi = 128 - ROAD_W / 2, 128 + ROAD_W / 2
     arms = []
     if mask & 1: arms.append((lo, 3, ROAD_W, 125))
     if mask & 2: arms.append((128, lo, 125, ROAD_W))
     if mask & 4: arms.append((lo, 128, ROAD_W, 125))
     if mask & 8: arms.append((3, lo, 125, ROAD_W))
-    # sidewalk planters at corners not touched by arms
-    for (cx, cy) in [(42, 42), (214, 42), (42, 214), (214, 214)]:
-        b += f'<rect x="{cx-14}" y="{cy-14}" width="28" height="28" rx="6" fill="#C5B795"/>'
-        b += f'<circle cx="{cx}" cy="{cy}" r="9" fill="{OLIVE_DARK}"/><circle cx="{cx-2}" cy="{cy-2}" r="6" fill="{OLIVE}"/>'
+    # sidewalk planters at corners not touched by arms (the shaded street has trees there instead)
+    if style != "shaded":
+        for (cx, cy) in corners:
+            b += f'<rect x="{cx-14}" y="{cy-14}" width="28" height="28" rx="6" fill="#C5B795"/>'
+            b += f'<circle cx="{cx}" cy="{cy}" r="9" fill="{OLIVE_DARK}"/><circle cx="{cx-2}" cy="{cy-2}" r="6" fill="{OLIVE}"/>'
+    # drawn last so crowns hang over the road
+    overlay = "".join(canopy(cx, cy) for cx, cy in corners) if style == "shaded" else ""
     if mask == 0:
-        b += f'<circle cx="128" cy="128" r="66" fill="{KERB}"/><circle cx="128" cy="128" r="60" fill="url(#asph)"/>'
-        b += f'<circle cx="128" cy="128" r="24" fill="{LEAF}" stroke="{KERB}" stroke-width="5"/>'
-        b += f'<circle cx="128" cy="128" r="42" fill="none" stroke="{MARK}" stroke-width="3" stroke-dasharray="10 9"/>'
-        return svg(b, defs=d)
-    # kerbs then asphalt
+        b += '<g clip-path="url(#inner)">'
+        b += f'<circle cx="128" cy="128" r="66" fill="{kerb}"/><circle cx="128" cy="128" r="60" fill="url(#asph)"/>'
+        b += f'<circle cx="128" cy="128" r="24" fill="{LEAF}" stroke="{kerb}" stroke-width="5"/>'
+        b += f'<circle cx="128" cy="128" r="42" fill="none" stroke="{mark}" stroke-width="3" stroke-dasharray="10 9"/>'
+        return svg(b + overlay + "</g>", defs=d)
+    # kerbs then asphalt, clipped to the tile so arms never spill over the rim
+    b += '<g clip-path="url(#inner)">'
     for x, y, w, h in arms:
-        b += f'<rect x="{x - (5 if w == ROAD_W else 0)}" y="{y - (5 if h == ROAD_W else 0)}" width="{w + (10 if w == ROAD_W else 0)}" height="{h + (10 if h == ROAD_W else 0)}" fill="{KERB}"/>'
-    b += f'<rect x="{lo-5}" y="{lo-5}" width="{ROAD_W+10}" height="{ROAD_W+10}" rx="14" fill="{KERB}"/>'
+        b += f'<rect x="{x - (5 if w == ROAD_W else 0)}" y="{y - (5 if h == ROAD_W else 0)}" width="{w + (10 if w == ROAD_W else 0)}" height="{h + (10 if h == ROAD_W else 0)}" fill="{kerb}"/>'
+    b += f'<rect x="{lo-5}" y="{lo-5}" width="{ROAD_W+10}" height="{ROAD_W+10}" rx="14" fill="{kerb}"/>'
     for x, y, w, h in arms:
         b += f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="url(#asph)"/>'
     b += f'<rect x="{lo}" y="{lo}" width="{ROAD_W}" height="{ROAD_W}" rx="10" fill="url(#asph)"/>'
     # centre line dashes on each arm; junctions get a zebra crossing per arm
-    dash = f'stroke="{MARK}" stroke-width="5" stroke-dasharray="16 12" stroke-linecap="round"'
+    dash = f'stroke="{mark}" stroke-width="{st["width"]}" stroke-dasharray="{st["dash"]}" stroke-linecap="round"'
     count = bin(mask).count("1")
     near, far = (34, 222) if count > 2 else (128, 128)
     if mask & 1: b += f'<line x1="128" y1="10" x2="128" y2="{near}" {dash}/>'
     if mask & 4: b += f'<line x1="128" y1="246" x2="128" y2="{far}" {dash}/>'
     if mask & 2: b += f'<line x1="246" y1="128" x2="{far}" y2="128" {dash}/>'
     if mask & 8: b += f'<line x1="10" y1="128" x2="{near}" y2="128" {dash}/>'
-    if count > 2:
+    if count > 2 and style != "pedestrian":
         zebra = ""
         for i in range(6):
             o = lo + 8 + i * 16
@@ -516,10 +565,14 @@ def road(mask):
             if mask & 4: zebra += f'<rect x="{o}" y="188" width="9" height="24" rx="1.5"/>'
             if mask & 2: zebra += f'<rect x="188" y="{o}" width="24" height="9" rx="1.5"/>'
             if mask & 8: zebra += f'<rect x="44" y="{o}" width="24" height="9" rx="1.5"/>'
-        b += f'<g fill="{MARK}" opacity="0.92">{zebra}</g>'
-    if count == 1:
-        b += f'<circle cx="128" cy="128" r="10" fill="{MARK}" opacity="0.9"/>'
-    return svg(b, defs=d)
+        b += f'<g fill="{mark}" opacity="0.92">{zebra}</g>'
+    if count == 1 and style in ("road", "shaded"):
+        b += f'<circle cx="128" cy="128" r="10" fill="{mark}" opacity="0.9"/>'
+    if style == "bike":
+        b += bike_glyph(128, 128)
+    if style == "pedestrian":
+        b += bollards(mask, lo, hi)
+    return svg(b + overlay + "</g>", defs=d)
 
 
 def lot():
@@ -656,25 +709,452 @@ def icon_crown():
     return svg(b, 64)
 
 
+# ---------------------------------------------------------------- student housing and services
+
+STUDENT_BLUE = "#4F8BEA"
+STUDENT_DARK = "#2F63B8"
+SANDSTONE = "#EADFC6"
+SANDSTONE_SIDE = "#CDBF9F"
+SANDSTONE_TOP = "#F4ECD8"
+
+
+def mortarboard(cx, cy, s=1.0, col=INK, tassel=GOLD):
+    """A graduation cap centred at (cx, cy)."""
+    return (
+        f'<g transform="translate({cx} {cy}) scale({s})">'
+        f'<path d="M-14 6 v8 q14 7 28 0 v-8 l-14 6z" fill="{col}" opacity="0.85"/>'
+        f'<polygon points="0,-12 -26,-1 0,10 26,-1" fill="{col}"/>'
+        f'<line x1="22" y1="-1" x2="22" y2="14" stroke="{tassel}" stroke-width="2.4"/>'
+        f'<circle cx="22" cy="16" r="3" fill="{tassel}"/>'
+        f'</g>'
+    )
+
+
+def bicycle(x, y, s=1.0, col=BOUG):
+    """A bicycle standing on the ground at (x, y), side view, about 44 wide."""
+    return (
+        f'<g transform="translate({x} {y}) scale({s})">'
+        f'<ellipse cx="0" cy="1" rx="24" ry="3.5" fill="{SHADOW}" opacity="0.28"/>'
+        f'<circle cx="-15" cy="-10" r="10" fill="none" stroke="{INK}" stroke-width="2.6"/>'
+        f'<circle cx="15" cy="-10" r="10" fill="none" stroke="{INK}" stroke-width="2.6"/>'
+        f'<path d="M-15 -10 L-3 -22 L10 -22 L15 -10 M-3 -22 L2 -10 L-15 -10 M10 -22 L8 -28 M4 -28 h8" fill="none" stroke="{col}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'<path d="M-6 -24 h8" stroke="{INK}" stroke-width="3" stroke-linecap="round"/>'
+        f'</g>'
+    )
+
+
+def book_stack(x, y, cols=(BOUG, SHUTTER, GOLD)):
+    """A little stack of books, bottom-left at (x, y)."""
+    out = ""
+    for i, c in enumerate(cols):
+        w = 30 - i * 3
+        out += f'<rect x="{x + i}" y="{y - (i + 1) * 8}" width="{w}" height="8" rx="1.5" fill="{c}" stroke="{INK}" stroke-width="1" stroke-opacity="0.35"/>'
+        out += f'<line x1="{x + i + 3}" y1="{y - i * 8 - 4}" x2="{x + i + w - 3}" y2="{y - i * 8 - 4}" stroke="{WHITE}" stroke-width="1.2" opacity="0.7"/>'
+    return out
+
+
+def student_small():
+    d, b = frame("building")
+    d += GLASS_DEFS
+    b += ground_shadow([(60, 208), (180, 208), (210, 192), (196, 110)])
+    b += box(60, 112, 112, 96, 22, 14, "#F2EEF8", "#CFC9DE", "#E6E0F0")
+    b += f'<polygon points="56,114 172,114 194,100 78,100" fill="{STUDENT_BLUE}"/>'
+    b += f'<polygon points="172,114 194,100 194,106 172,120" fill="{STUDENT_DARK}"/>'
+    b += mortarboard(112, 76, 1.05, STUDENT_DARK)
+    b += f'<line x1="112" y1="96" x2="112" y2="104" stroke="{INK}" stroke-width="2.5"/>'
+    b += door(76, 166, 22, 42, STUDENT_BLUE)
+    b += window(124, 134, 22, 26, shutters=False)
+    b += window(124, 172, 22, 24, shutters=False)
+    b += window(76, 130, 22, 26, shutters=False)
+    b += bicycle(64, 232, 0.8)
+    b += book_stack(176, 232)
+    b += grass_tufts([(36, 60), (216, 62)])
+    return svg(b, defs=d)
+
+
+def student_large():
+    d, b = frame("building")
+    d += GLASS_DEFS
+    b += ground_shadow([(36, 204), (190, 204), (222, 186), (208, 78)])
+    b += box(36, 80, 154, 124, 26, 16, "#F2EEF8", "#CFC9DE", "#E6E0F0")
+    b += f'<polygon points="30,82 190,82 216,66 56,66" fill="{STUDENT_BLUE}"/>'
+    b += f'<polygon points="190,82 216,66 216,72 190,88" fill="{STUDENT_DARK}"/>'
+    b += mortarboard(112, 44, 1.2, STUDENT_DARK)
+    for row, y in enumerate([98, 138]):
+        for x in [48, 84, 122, 156]:
+            b += window(x, y, 20, 24, shutters=False)
+            if row == 0:
+                b += f'<rect x="{x-3}" y="{y+24}" width="26" height="4" fill="{STUDENT_BLUE}"/>'
+    b += door(100, 168, 28, 36, STUDENT_BLUE)
+    b += f'<rect x="92" y="164" width="44" height="6" rx="2" fill="{STUDENT_DARK}"/>'
+    b += bicycle(54, 232, 0.8, SHUTTER)
+    b += bicycle(96, 236, 0.8, BOUG)
+    b += book_stack(168, 236)
+    b += person(210, 232, "#4F8BEA", s=0.8)
+    return svg(b, defs=d)
+
+
+def commercial():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(40, 198), (196, 198), (226, 180), (210, 92)])
+    b += box(40, 94, 156, 104, 28, 17, "#F4EFE2", WHITE_SIDE, WHITE_TOP)
+    b += f'<rect x="40" y="94" width="156" height="26" fill="#C98A1A"/>'
+    b += f'<rect x="108" y="48" width="44" height="40" rx="6" fill="{WHITE}" stroke="#C98A1A" stroke-width="4"/>'
+    b += f'<path d="M118 64 h24 l-2 20 h-20z" fill="#E5A12B"/><path d="M123 64 a7 7 0 0 1 14 0" fill="none" stroke="#8A5A0C" stroke-width="3"/>'
+    for i, x in enumerate([52, 94, 136]):
+        col = SHUTTER if i % 2 == 0 else TERRACOTTA
+        b += f'<rect x="{x}" y="126" width="36" height="46" rx="3" fill="url(#glass)"/>'
+        b += f'<polygon points="{x-3},126 {x+39},126 {x+43},116 {x+1},116" fill="{col}"/>'
+        b += f'<rect x="{x+6}" y="152" width="10" height="20" fill="{col}" opacity="0.5"/><rect x="{x+20}" y="146" width="10" height="26" fill="{GOLD}" opacity="0.6"/>'
+    b += door(92, 168, 20, 30, SHUTTER, arch=False)
+    b += f'<rect x="34" y="214" width="34" height="22" rx="3" fill="#B07A45" stroke="#7A5232" stroke-width="2"/>'
+    b += f'<rect x="44" y="204" width="34" height="22" rx="3" fill="#C58A52" stroke="#7A5232" stroke-width="2"/>'
+    b += person(150, 234, "#E5A12B", s=0.9)
+    b += f'<rect x="176" y="218" width="30" height="16" rx="2" fill="{SHUTTER}"/><circle cx="184" cy="238" r="4" fill="{INK}"/><circle cx="200" cy="238" r="4" fill="{INK}"/>'
+    return svg(b, defs=d)
+
+
+def university():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(28, 200), (192, 200), (226, 182), (210, 112)])
+    b += box(28, 116, 164, 84, 28, 17, SANDSTONE, SANDSTONE_SIDE, SANDSTONE_TOP)
+    b += f'<polygon points="62,116 158,116 110,70" fill="{SANDSTONE_TOP}" stroke="{SANDSTONE_SIDE}" stroke-width="3"/>'
+    b += f'<circle cx="110" cy="100" r="9" fill="{STUDENT_BLUE}" stroke="{WHITE}" stroke-width="3"/>'
+    b += f'<path d="M82 48 a28 28 0 0 1 56 0z" fill="{STUDENT_DARK}"/><rect x="106" y="22" width="8" height="14" fill="{STUDENT_DARK}"/>'
+    b += f'<polygon points="114,22 134,28 114,34" fill="{BOUG}"/>'
+    for x in [66, 88, 110, 132]:
+        b += f'<rect x="{x}" y="118" width="12" height="70" fill="{WHITE}" stroke="{SANDSTONE_SIDE}" stroke-width="2"/>'
+        b += f'<rect x="{x-3}" y="114" width="18" height="6" fill="{SANDSTONE_SIDE}"/><rect x="{x-3}" y="186" width="18" height="6" fill="{SANDSTONE_SIDE}"/>'
+    b += door(100, 150, 20, 38, STUDENT_DARK)
+    for x in [38, 160]:
+        b += window(x, 138, 18, 30, shutters=False)
+    for i in range(3):
+        b += f'<rect x="{50 - i*6}" y="{200 + i*6}" width="{120 + i*12}" height="6" fill="{SANDSTONE}" stroke="{SANDSTONE_SIDE}" stroke-width="1.5"/>'
+    b += person(70, 236, "#4F8BEA", s=0.8)
+    b += person(150, 238, BOUG, s=0.8)
+    b += mortarboard(204, 226, 0.6, INK)
+    return svg(b, defs=d)
+
+
+def library():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    front, side, top = "#E7D3B0", "#C9B189", "#F0E1C4"
+    b += ground_shadow([(40, 196), (186, 196), (220, 178), (204, 98)])
+    b += box(40, 100, 146, 96, 26, 16, front, side, top)
+    b += f'<polygon points="34,102 192,102 214,88 56,88" fill="#3F7A5B"/>'
+    b += f'<polygon points="192,102 214,88 214,94 192,108" fill="#2C5A42"/>'
+    b += f'<path d="M92 66 q10 -8 20 0 q10 -8 20 0 v22 q-10 -6 -20 0 q-10 -6 -20 0z" fill="{WHITE}" stroke="#2C5A42" stroke-width="3" stroke-linejoin="round"/>'
+    b += f'<line x1="112" y1="66" x2="112" y2="86" stroke="#2C5A42" stroke-width="2.5"/>'
+    for x in [54, 92, 138]:
+        b += f'<path d="M{x} 176 V132 a14 14 0 0 1 28 0 V176z" fill="url(#glass)" stroke="{WHITE}" stroke-width="3"/>'
+        b += f'<line x1="{x+14}" y1="120" x2="{x+14}" y2="176" stroke="{WHITE}" stroke-width="2"/>'
+    b += door(104, 150, 24, 46, "#3F7A5B")
+    for i in range(4):
+        b += f'<rect x="{44 + i*10}" y="196" width="10" height="6" fill="{front}" stroke="{side}" stroke-width="1.2"/>'
+    b += book_stack(52, 236, (SHUTTER, TERRACOTTA, "#3F7A5B", GOLD))
+    b += f'<rect x="150" y="214" width="46" height="8" rx="2" fill="{TRUNK}"/><rect x="154" y="222" width="5" height="12" fill="{INK}"/><rect x="187" y="222" width="5" height="12" fill="{INK}"/>'
+    b += person(172, 212, "#4F8BEA", s=0.7)
+    return svg(b, defs=d)
+
+
+def bookshop():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(44, 186), (186, 186), (218, 168), (202, 100)])
+    b += box(44, 106, 142, 80, 24, 15, "#7B2E3B", "#5E1F2B", "#8D3C4A")
+    b += f'<polygon points="38,120 192,120 184,106 46,106" fill="#245A3D"/>'
+    for i in range(9):
+        col = "#2F7A52" if i % 2 == 0 else WHITE
+        b += f'<polygon points="{38 + i*17.1:.1f},120 {55.1 + i*17.1:.1f},120 {55.1 + i*17.1:.1f},136 {38 + i*17.1:.1f},136" fill="{col}"/>'
+    b += f'<rect x="84" y="62" width="60" height="30" rx="5" fill="{WHITE}" stroke="#245A3D" stroke-width="4"/>'
+    b += f'<path d="M96 70 q8 -5 18 0 q10 -5 18 0 v14 q-8 -4 -18 0 q-10 -4 -18 0z" fill="#E7D3B0" stroke="#245A3D" stroke-width="2.4"/>'
+    b += f'<rect x="54" y="140" width="70" height="46" rx="2" fill="url(#glass)"/>'
+    shelf = ""
+    for i, c in enumerate([BOUG, GOLD, SHUTTER, "#2F7A52", TERRACOTTA, BOUG_LIGHT, SHUTTER_DARK, GOLD]):
+        shelf += f'<rect x="{58 + i*8}" y="{156 - (i % 3) * 3}" width="7" height="{20 + (i % 3) * 3}" fill="{c}"/>'
+    b += shelf + f'<rect x="54" y="176" width="70" height="4" fill="{WHITE_SIDE}"/>'
+    b += door(136, 144, 22, 42, "#245A3D")
+    b += f'<polygon points="176,232 192,196 208,232" fill="#2B3A2E"/><polygon points="181,226 192,203 203,226" fill="{WHITE}"/>'
+    b += book_stack(60, 236, (TERRACOTTA, "#2F7A52", GOLD))
+    b += person(126, 232, "#A15CC9", s=0.85)
+    return svg(b, defs=d)
+
+
+def print_shop():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(48, 190), (182, 190), (214, 172), (200, 100)])
+    b += box(48, 104, 134, 86, 24, 15, "#EEF3F6", "#C5D1DA", "#E1E9EE")
+    for i, c in enumerate(["#1CA7D8", "#D6337A", "#F2C21C", INK]):
+        b += f'<rect x="{48 + i*33.5}" y="104" width="33.5" height="14" fill="{c}"/>'
+    b += f'<rect x="88" y="54" width="54" height="40" rx="6" fill="{WHITE}" stroke="{INK}" stroke-width="3.5"/>'
+    b += f'<rect x="98" y="62" width="34" height="16" rx="3" fill="{INK}"/><rect x="104" y="56" width="22" height="10" fill="{WHITE}" stroke="{INK}" stroke-width="2"/>'
+    b += f'<rect x="102" y="76" width="26" height="14" fill="{WHITE}" stroke="{INK}" stroke-width="2"/><line x1="106" y1="82" x2="124" y2="82" stroke="{INK}" stroke-width="1.5"/>'
+    b += f'<rect x="58" y="128" width="64" height="52" rx="2" fill="url(#glass)"/>'
+    b += f'<rect x="66" y="148" width="48" height="26" rx="3" fill="#6B7684"/><rect x="72" y="140" width="36" height="12" rx="2" fill="#98A4B1"/>'
+    b += f'<rect x="76" y="156" width="28" height="16" fill="{WHITE}"/>'
+    b += door(134, 140, 24, 50, INK, arch=False)
+    for i in range(3):
+        b += f'<rect x="{40 + (i % 2) * 4}" y="{214 - i * 9}" width="38" height="9" rx="1.5" fill="{WHITE}" stroke="{WHITE_SIDE}" stroke-width="1.5"/>'
+    b += f'<rect x="180" y="206" width="12" height="32" rx="6" fill="{GOLD}" stroke="#B9810F" stroke-width="2"/><rect x="196" y="210" width="12" height="28" rx="6" fill="{BOUG}" stroke="#A52264" stroke-width="2"/>'
+    b += person(128, 234, "#1CA7D8", s=0.85)
+    return svg(b, defs=d)
+
+
+def kiosk():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(70, 200), (170, 200), (200, 184), (188, 112)])
+    b += box(72, 112, 92, 88, 22, 14, "#F7E9C0", "#D9C48C", "#FFF1CE")
+    for i in range(8):
+        col = TERRACOTTA if i % 2 == 0 else WHITE
+        b += f'<polygon points="{62 + i*14.5:.1f},112 {76.5 + i*14.5:.1f},112 {80.5 + i*14.5:.1f},96 {66 + i*14.5:.1f},96" fill="{col}"/>'
+    b += "".join(f'<path d="M{62 + i*14.5:.1f} 112 q7.2 10 14.5 0" fill="{TERRACOTTA if i % 2 == 0 else WHITE}"/>' for i in range(8))
+    b += f'<polygon points="62,96 178,96 168,78 72,78" fill="{TERRACOTTA_DARK}"/>'
+    b += f'<circle cx="120" cy="64" r="14" fill="{GOLD}" stroke="{WHITE}" stroke-width="3"/><path d="M114 62 h12 l-6 12z" fill="{TERRACOTTA}"/>'
+    b += f'<rect x="84" y="136" width="64" height="36" rx="2" fill="url(#glass)"/>'
+    b += f'<rect x="80" y="170" width="72" height="8" rx="2" fill="{TRUNK}"/>'
+    for i, c in enumerate([SHUTTER, TERRACOTTA, "#2FA05A", GOLD, BOUG]):
+        b += f'<rect x="{88 + i*11}" y="178" width="9" height="16" fill="{c}"/>'
+    b += f'<rect x="168" y="150" width="10" height="46" fill="{SHUTTER_DARK}"/><circle cx="173" cy="146" r="9" fill="{WHITE}" stroke="{SHUTTER_DARK}" stroke-width="2"/>'
+    b += person(60, 234, "#E5A12B", s=0.9)
+    b += person(186, 232, "#3A8DDE", s=0.85)
+    b += pot_plant(120, 236)
+    return svg(b, defs=d)
+
+
+def restaurant():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(44, 172), (184, 172), (216, 154), (200, 88)])
+    b += box(44, 92, 140, 80, 26, 16, "#F6E3C8", "#DDBF98", "#FFF0DA")
+    b += f'<polygon points="38,106 190,106 182,94 46,94" fill="{TERRACOTTA_DARK}"/>'
+    for i in range(9):
+        col = TERRACOTTA if i % 2 == 0 else "#F6E3C8"
+        b += f'<polygon points="{38 + i*16.9:.1f},106 {54.9 + i*16.9:.1f},106 {54.9 + i*16.9:.1f},122 {38 + i*16.9:.1f},122" fill="{col}"/>'
+    b += f'<circle cx="114" cy="62" r="22" fill="{WHITE}" stroke="{TERRACOTTA}" stroke-width="5"/>'
+    b += f'<path d="M104 50 v22 M101 50 v10 a3 3 0 0 0 6 0 v-10" fill="none" stroke="{INK}" stroke-width="2.6" stroke-linecap="round"/>'
+    b += f'<path d="M124 50 q-6 8 -2 18 h2 v6 M124 50 v24" fill="none" stroke="{INK}" stroke-width="2.6" stroke-linecap="round"/>'
+    b += f'<rect x="58" y="128" width="42" height="34" rx="2" fill="url(#glass)"/><rect x="128" y="128" width="42" height="34" rx="2" fill="url(#glass)"/>'
+    b += door(106, 126, 22, 46, TERRACOTTA_DARK)
+    for x in [64, 164]:
+        b += f'<ellipse cx="{x+4}" cy="224" rx="26" ry="7" fill="{SHADOW}" opacity="0.25"/>'
+        b += f'<ellipse cx="{x}" cy="212" rx="22" ry="8" fill="{WHITE}" stroke="{TERRACOTTA}" stroke-width="2.5"/>'
+        b += f'<path d="M{x-14} 212 h28 M{x} 206 v12" stroke="{TERRACOTTA}" stroke-width="2" opacity="0.7"/>'
+        b += f'<rect x="{x-3}" y="218" width="6" height="14" fill="{INK}"/>'
+        b += f'<circle cx="{x-6}" cy="207" r="4" fill="{GOLD}"/><circle cx="{x+7}" cy="209" r="3" fill="#2FA05A"/>'
+    b += person(118, 236, "#2F7A52", s=0.85)
+    return svg(b, defs=d)
+
+
+def supermarket():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(30, 186), (204, 186), (230, 170), (216, 100)])
+    b += box(30, 102, 174, 84, 26, 16, "#F2F4EE", "#CDD4C6", "#E5EADF")
+    b += f'<rect x="30" y="102" width="174" height="26" fill="#2FA05A"/>'
+    b += f'<rect x="92" y="56" width="60" height="38" rx="6" fill="{WHITE}" stroke="#2FA05A" stroke-width="4"/>'
+    b += f'<path d="M104 70 h36 l-5 18 h-26z" fill="#2FA05A"/><path d="M112 70 a10 10 0 0 1 20 0" fill="none" stroke="#1E7A42" stroke-width="3.5"/>'
+    b += f'<rect x="40" y="136" width="154" height="44" rx="2" fill="url(#glass)"/>'
+    for x in range(60, 190, 38):
+        b += f'<line x1="{x}" y1="136" x2="{x}" y2="180" stroke="{WHITE}" stroke-width="3"/>'
+    for i, c in enumerate(["#F28C28", "#D6403A", "#F4D23C", "#79C060", "#D6403A", "#F28C28"]):
+        b += f'<circle cx="{54 + i*26}" cy="170" r="6" fill="{c}"/>'
+    b += f'<rect x="102" y="140" width="30" height="40" fill="{WHITE}" opacity="0.55"/>'
+    b += f'<path d="M40 214 h38 l-6 -26 h-36" fill="none" stroke="{INK}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
+    b += f'<line x1="44" y1="196" x2="76" y2="196" stroke="{INK}" stroke-width="2.5"/><circle cx="50" cy="220" r="4" fill="{INK}"/><circle cx="72" cy="220" r="4" fill="{INK}"/>'
+    b += f'<path d="M88 216 h40 l-6 -26 h-34" fill="none" stroke="#6B7684" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="98" cy="222" r="4" fill="#6B7684"/><circle cx="120" cy="222" r="4" fill="#6B7684"/>'
+    b += person(176, 236, "#E0533A", s=0.9)
+    b += pot_plant(208, 238)
+    return svg(b, defs=d)
+
+
+def hospital():
+    d, b = frame("amenity")
+    d += GLASS_DEFS
+    b += ground_shadow([(40, 214), (176, 214), (210, 196), (196, 54)])
+    b += box(40, 72, 136, 142, 28, 17, "#F6F9FB", "#C8D6DF", "#E6EEF3")
+    b += f'<rect x="80" y="26" width="56" height="50" rx="8" fill="{WHITE}" stroke="#3A8DDE" stroke-width="4"/>'
+    b += f'<path d="M100 34 h16 v14 h14 v16 h-14 v10 h-16 v-10 h-14 v-16 h14z" fill="#D63A3A"/>'
+    for y in [92, 128]:
+        for x in [52, 84, 116, 146]:
+            b += f'<rect x="{x}" y="{y}" width="20" height="24" rx="2" fill="url(#glass)"/>'
+    b += f'<rect x="40" y="154" width="136" height="8" fill="#3A8DDE"/>'
+    b += f'<rect x="84" y="170" width="52" height="44" rx="3" fill="url(#glass)" stroke="#3A8DDE" stroke-width="3"/>'
+    b += f'<line x1="110" y1="170" x2="110" y2="214" stroke="#3A8DDE" stroke-width="3"/>'
+    b += f'<polygon points="76,166 144,166 152,158 84,158" fill="#3A8DDE"/>'
+    b += f'<rect x="168" y="214" width="56" height="26" rx="5" fill="{WHITE}" stroke="{WHITE_SIDE}" stroke-width="2"/>'
+    b += f'<rect x="206" y="218" width="16" height="12" rx="2" fill="url(#glass)"/><rect x="168" y="228" width="56" height="4" fill="#D63A3A"/>'
+    b += f'<path d="M184 218 h6 v-4 h4 v4 h6 v4 h-6 v4 h-4 v-4 h-6z" fill="#D63A3A"/>'
+    b += f'<circle cx="182" cy="241" r="5" fill="{INK}"/><circle cx="212" cy="241" r="5" fill="{INK}"/><rect x="190" y="208" width="10" height="6" rx="2" fill="#E0533A"/>'
+    b += person(60, 236, "#3A8DDE", s=0.85)
+    return svg(b, defs=d)
+
+
+def parking():
+    d, b = frame("amenity", paving=False)
+    d += GLASS_DEFS
+    b += f'<rect x="26" y="26" width="204" height="204" rx="14" fill="#59616F"/>'
+    b += f'<rect x="30" y="30" width="196" height="196" rx="11" fill="#6B7684"/>'
+    for i in range(5):
+        x = 38 + i * 36
+        b += f'<line x1="{x}" y1="38" x2="{x}" y2="96" stroke="{WHITE}" stroke-width="3" opacity="0.9"/>'
+        b += f'<line x1="{x}" y1="160" x2="{x}" y2="218" stroke="{WHITE}" stroke-width="3" opacity="0.9"/>'
+    b += f'<line x1="38" y1="38" x2="218" y2="38" stroke="{WHITE}" stroke-width="3" opacity="0.9"/>'
+    b += f'<line x1="38" y1="218" x2="218" y2="218" stroke="{WHITE}" stroke-width="3" opacity="0.9"/>'
+    b += f'<path d="M50 128 h40 M166 128 h40" stroke="{GOLD}" stroke-width="4" stroke-dasharray="14 10" stroke-linecap="round"/>'
+
+    def vcar(x, y, col):
+        return (
+            f'<rect x="{x-11+2}" y="{y-22+3}" width="22" height="44" rx="7" fill="{SHADOW}" opacity="0.28"/>'
+            f'<rect x="{x-11}" y="{y-22}" width="22" height="44" rx="7" fill="{col}"/>'
+            f'<rect x="{x-8}" y="{y-12}" width="16" height="22" rx="4" fill="url(#glass)"/>'
+            f'<rect x="{x-8}" y="{y-20}" width="4" height="3" rx="1" fill="{GOLD}"/><rect x="{x+4}" y="{y-20}" width="4" height="3" rx="1" fill="{GOLD}"/>'
+        )
+    b += vcar(56, 68, "#E0533A") + vcar(92, 68, "#3A8DDE") + vcar(164, 68, "#F2B630")
+    b += vcar(128, 190, WHITE) + vcar(200, 190, "#2FA05A") + vcar(56, 190, "#A15CC9")
+    b += f'<rect x="206" y="96" width="5" height="42" fill="{INK}"/>'
+    b += f'<rect x="192" y="66" width="34" height="34" rx="7" fill="#2A6FD0" stroke="{WHITE}" stroke-width="3"/>'
+    b += f'<path d="M203 90 v-16 h8 a6 6 0 0 1 0 12 h-8" fill="none" stroke="{WHITE}" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>'
+    return svg(b, defs=d)
+
+
+# ---------------------------------------------------------------- role icons
+
+def role_icon(color, glyph):
+    return svg(
+        '<circle cx="32" cy="34" r="29" fill="#000" opacity="0.28"/>'
+        f'<circle cx="32" cy="32" r="29" fill="{color}"/>'
+        '<circle cx="32" cy="32" r="29" fill="none" stroke="#FFFFFF" stroke-opacity="0.45" stroke-width="2.5"/>'
+        + glyph,
+        64,
+    )
+
+
+def icon_role_student():
+    g = '<polygon points="32,15 10,26 32,37 54,26" fill="#FFFFFF"/>'
+    g += '<path d="M20 32 v9 q12 8 24 0 v-9 l-12 6z" fill="#FFFFFF" opacity="0.9"/>'
+    g += '<line x1="50" y1="27" x2="50" y2="42" stroke="#FFE68A" stroke-width="2.6"/><circle cx="50" cy="44" r="3" fill="#FFE68A"/>'
+    return role_icon("#4F8BEA", g)
+
+
+def icon_role_worker():
+    g = '<rect x="15" y="25" width="34" height="23" rx="4" fill="#FFFFFF"/>'
+    g += '<path d="M25 25 v-4 a3 3 0 0 1 3 -3 h8 a3 3 0 0 1 3 3 v4" fill="none" stroke="#FFFFFF" stroke-width="3.2"/>'
+    g += '<rect x="15" y="34" width="34" height="3" fill="#E5A12B" opacity="0.7"/><rect x="29" y="32" width="6" height="7" rx="1.5" fill="#E5A12B"/>'
+    return role_icon("#E5A12B", g)
+
+
+def icon_role_child():
+    g = '<circle cx="32" cy="23" r="9" fill="#FFFFFF"/>'
+    g += '<path d="M22 49 v-8 a10 10 0 0 1 20 0 v8z" fill="#FFFFFF"/>'
+    g += '<circle cx="22" cy="19" r="4" fill="#FFFFFF"/><circle cx="42" cy="19" r="4" fill="#FFFFFF"/>'
+    g += '<circle cx="29" cy="23" r="1.6" fill="#E2569C"/><circle cx="35" cy="23" r="1.6" fill="#E2569C"/>'
+    g += '<path d="M29 27.5 q3 3 6 0" fill="none" stroke="#E2569C" stroke-width="1.6" stroke-linecap="round"/>'
+    return role_icon("#E2569C", g)
+
+
+def icon_role_older():
+    g = '<circle cx="28" cy="19" r="8" fill="#FFFFFF"/>'
+    g += '<path d="M18 49 v-11 a10 10 0 0 1 20 0 v11z" fill="#FFFFFF"/>'
+    g += '<path d="M44 32 v18 M44 32 q0 -6 6 -6 q4 0 4 4" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round"/>'
+    g += '<path d="M20 15 q8 -9 16 0" fill="none" stroke="#8C6CC4" stroke-width="2.2" opacity="0.55"/>'
+    return role_icon("#8C6CC4", g)
+
+
+def icon_role_access():
+    """Resident with a disability: a person in a wheelchair, white on teal."""
+    g = '<circle cx="30" cy="15" r="5.5" fill="#FFFFFF"/>'
+    g += '<path d="M30 23 v13 h13 l5 9" fill="none" stroke="#FFFFFF" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    g += '<path d="M30 29 h10" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>'
+    g += '<path d="M23 31 a12.5 12.5 0 1 0 17 17" fill="none" stroke="#FFFFFF" stroke-width="4.2" stroke-linecap="round"/>'
+    return role_icon("#2FA3A0", g)
+
+
+def icon_role_expat():
+    """Expat: a globe with a small plane, white on orange."""
+    g = '<circle cx="30" cy="33" r="16" fill="none" stroke="#FFFFFF" stroke-width="3.4"/>'
+    g += '<ellipse cx="30" cy="33" rx="7" ry="16" fill="none" stroke="#FFFFFF" stroke-width="2.6"/>'
+    g += '<path d="M14 33 h32 M17 24 h26 M17 42 h26" fill="none" stroke="#FFFFFF" stroke-width="2.4"/>'
+    g += '<path d="M40 12 l14 -2 l-6 6 l2 8 l-4 -3 l-3 4 l-1 -6 l-6 -2 z" fill="#FFE2C4" stroke="#D8682B" stroke-width="1.6" stroke-linejoin="round"/>'
+    return role_icon("#D8682B", g)
+
+
+def icon_event():
+    """Event deck emblem: a gold star on a green disc."""
+    import math
+    pts = []
+    for k in range(10):
+        a = -math.pi / 2 + k * math.pi / 5
+        r = 22 if k % 2 == 0 else 10
+        pts.append(f"{32 + r * math.cos(a):.1f},{33 + r * math.sin(a):.1f}")
+    b = '<circle cx="32" cy="34" r="29" fill="#000" opacity="0.28"/><circle cx="32" cy="32" r="29" fill="#2FA05A"/>'
+    b += '<circle cx="32" cy="32" r="29" fill="none" stroke="#FFE68A" stroke-width="3"/>'
+    b += f'<polygon points="{" ".join(pts)}" fill="#FFE68A" stroke="#B9810F" stroke-width="2.5" stroke-linejoin="round"/>'
+    return svg(b, 64)
+
+
+def icon_penalty():
+    """Penalty deck emblem: a warning triangle on a red disc."""
+    b = '<circle cx="32" cy="34" r="29" fill="#000" opacity="0.28"/><circle cx="32" cy="32" r="29" fill="#C8402A"/>'
+    b += '<circle cx="32" cy="32" r="29" fill="none" stroke="#FFD0C4" stroke-width="3"/>'
+    b += '<path d="M32 12 L54 50 H10 Z" fill="#F2C21C" stroke="#7A1C10" stroke-width="3.5" stroke-linejoin="round"/>'
+    b += '<rect x="29.5" y="24" width="5" height="14" rx="2.5" fill="#3A140E"/><circle cx="32" cy="44" r="3" fill="#3A140E"/>'
+    return svg(b, 64)
+
+
+TILE_CLIP_MARKER = 'stroke-opacity="0.28" stroke-width="3"/>'
+
+
+def clip_to_tile(svg_text):
+    """Keeps a tile's drawing inside its border: everything drawn after the frame is clipped to the
+    inner ground area, so paths, trees and roofs end at the border instead of crossing it."""
+    if TILE_CLIP_MARKER not in svg_text:
+        return svg_text
+    head, rest = svg_text.split("</defs>", 1)
+    body, tail = rest.rsplit("</svg>", 1)
+    cut = body.index(TILE_CLIP_MARKER) + len(TILE_CLIP_MARKER)
+    head += '<clipPath id="tile-clip"><rect x="10" y="10" width="236" height="236" rx="22"/></clipPath>'
+    return head + "</defs>" + body[:cut] + '<g clip-path="url(#tile-clip)">' + body[cut:] + "</g></svg>\n"
+
+
 def main():
     os.makedirs(TILES, exist_ok=True)
     os.makedirs(UI, exist_ok=True)
+    from gen_homes import HOMES  # one building per household, see tools/gen_homes.py
     tiles = {
-        "apartment_small": apartment_small(), "apartment_medium": apartment_medium(),
-        "apartment_large": apartment_large(), "amenity_cafe": amenity_cafe(),
+        "amenity_cafe": amenity_cafe(),
         "amenity_clinic": amenity_clinic(), "amenity_school": amenity_school(),
         "amenity_market": amenity_market(), "park": park(), "trees": trees(),
         "lot": lot(), "shade_edge": shade_edge(),
+        "student_small": student_small(), "student_large": student_large(),
+        "commercial": commercial(), "university": university(), "library": library(),
+        "bookshop": bookshop(), "print_shop": print_shop(), "kiosk": kiosk(),
+        "restaurant": restaurant(), "supermarket": supermarket(), "hospital": hospital(),
+        "parking": parking(),
     }
+    for name, draw in HOMES.items():
+        tiles[name] = draw()
     for m in range(16):
         tiles[f"road_{m}"] = road(m)
+        for style in ("shaded", "pedestrian", "bike"):
+            tiles[f"road_{style}_{m}"] = road(m, style)
     for name, content in tiles.items():
+        if not name.startswith("road_"):
+            content = clip_to_tile(content)
         with open(os.path.join(TILES, name + ".svg"), "w", encoding="utf-8") as f:
             f.write(content)
     icons = {
         "coin": coin(), "citizen": icon_citizen(), "pollution": icon_pollution(),
         "leaf": icon_leaf(), "sun": icon_sun(), "bank": icon_bank(), "route": icon_route(),
         "walk": icon_walk(), "sprout": icon_sprout(), "trophy": icon_trophy(), "crown": icon_crown(),
+        "role_student": icon_role_student(), "role_worker": icon_role_worker(),
+        "role_child": icon_role_child(), "role_older": icon_role_older(),
+        "role_access": icon_role_access(), "role_expat": icon_role_expat(),
+        "event": icon_event(), "penalty": icon_penalty(),
     }
     for name, content in icons.items():
         with open(os.path.join(UI, name + ".svg"), "w", encoding="utf-8") as f:

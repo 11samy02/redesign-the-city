@@ -59,9 +59,9 @@ static func landed(fx: Control, tile: Dictionary, to_rect: Rect2, points_delta: 
 	var center := to_rect.get_center()
 	var kind: int = tile["kind"]
 	var kind_fx := "dust"
-	if kind == TileDefs.Kind.PARK or kind == TileDefs.Kind.TREES:
+	if kind == TileDefs.Kind.PARK or TileDefs.is_tree_like(tile):
 		kind_fx = "leaves"
-	elif kind == TileDefs.Kind.AMENITY:
+	elif TileDefs.is_service(kind):
 		kind_fx = "sparkle"
 	Widgets.burst(fx, center + Vector2(0, to_rect.size.y * 0.3), "dust", 14)
 	if kind_fx != "dust":

@@ -5,6 +5,7 @@ const UiKit = preload("res://scripts/ui/ui_kit.gd")
 const Widgets = preload("res://scripts/ui/widgets.gd")
 const Describe = preload("res://scripts/ui/describe.gd")
 const OverlayKit = preload("res://scripts/ui/overlay_kit.gd")
+const GameState = preload("res://scripts/core/game_state.gd")
 
 signal dismissed
 
@@ -68,7 +69,7 @@ func _build_chips(p) -> Control:
 	chips.add_theme_constant_override("separation", 8)
 	var r: Dictionary = _gs.score(_gs.current_index())
 	chips.add_child(UiKit.chip("%d gold" % p.money, UiKit.GOLD_DEEP, UiKit.LIMESTONE, 15))
-	chips.add_child(UiKit.chip("Buy 2 tiles", UiKit.PANEL_HI, UiKit.LIMESTONE, 15))
+	chips.add_child(UiKit.chip("Buy %d tiles" % GameState.BUYS_PER_TURN, UiKit.PANEL_HI, UiKit.LIMESTONE, 15))
 	chips.add_child(UiKit.chip("%d free road%s" % [p.free_roads, "" if p.free_roads == 1 else "s"], UiKit.PANEL_HI, UiKit.LIMESTONE, 15))
 	chips.add_child(UiKit.chip("%s so far" % Describe.points(r["total"]), UiKit.PANEL_HI, UiKit.LIMESTONE, 15))
 	return chips

@@ -35,7 +35,7 @@ static func play(overlays: Control, big: String, small: String, extra: Control =
 	ov.add_child(ribbon)
 	var v := _ribbon_text(big, small, extra, Vector2(vp.x, ribbon_h), ribbon.position)
 	ov.add_child(v)
-	Sfx.play("fanfare" if big.begins_with("City") else "turn")
+	Sfx.play("fanfare" if big.begins_with("City") else "round")
 	var tw := overlays.create_tween()
 	tw.tween_property(ribbon, "scale:x", 1.0, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(v, "modulate:a", 1.0, 0.3).set_delay(0.15)

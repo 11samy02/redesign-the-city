@@ -18,15 +18,13 @@ var _last_order: Array = []
 
 func _init(gs) -> void:
 	_gs = gs
-	custom_minimum_size.x = 300
-	add_theme_constant_override("separation", 10)
-	_title = UiKit.label("Turn order", 26, UiKit.LIMESTONE, "display_bold")
+	custom_minimum_size.x = 255
+	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	add_theme_constant_override("separation", 8)
+	_title = UiKit.label("Turn order", 22, UiKit.LIMESTONE, "display_bold")
 	add_child(_title)
-	var hint := UiKit.label("After round 1 the city with the fewest points picks first. Click a city to look closer.", 14, UiKit.MUTED)
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	add_child(hint)
 	_cards = VBoxContainer.new()
-	_cards.add_theme_constant_override("separation", 10)
+	_cards.add_theme_constant_override("separation", 8)
 	add_child(_cards)
 	for i in _gs.players.size():
 		_refs.append(_make_card(i))
@@ -34,7 +32,7 @@ func _init(gs) -> void:
 
 func refresh() -> void:
 	var order: Array[int] = _gs.turn_order()
-	_title.text = "Turn order, round %d" % _gs.round_number
+	_title.text = "Round %d order" % _gs.round_number
 	var reordered := not _last_order.is_empty() and _last_order != Array(order)
 	var old_y := {}
 	for i in _refs.size():
@@ -44,6 +42,53 @@ func refresh() -> void:
 		_refresh_card(order[pos], pos)
 	if reordered:
 		_animate_reorder(old_y)
+
+
+## Floats a green "+8" or a red "-2" next to the gold of every planner whose gold changed since `before`
+## (one amount per planner, taken before a card or a round event), and rolls the number to its new value.
+## `fx_layer` is the screen's effects layer, where the floating numbers are drawn. Call it after refresh().
+func show_gold_changes(before: Array, fx_layer: Control) -> void:
+	var step := 0
+	for i in _refs.size():
+		var delta: int = _gs.players[i].money - before[i]
+		if delta != 0:
+			_announce_gold(i, before[i], delta, step * 0.18, fx_layer)
+			step += 1
+
+
+func _announce_gold(i: int, from_money: int, delta: int, delay: float, fx_layer: Control) -> void:
+	var label: Label = _refs[i]["money"]
+	var to_money := from_money + delta
+	label.text = str(from_money)
+	if delay > 0.0:
+		await get_tree().create_timer(delay).timeout
+	if not is_instance_valid(label) or not is_instance_valid(fx_layer):
+		return
+	var color: Color = UiKit.OLIVE if delta > 0 else UiKit.HEAT
+	var text_w := UiKit.font("display_bold").get_string_size(str(maxi(from_money, to_money)), HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+	var at := label.get_global_rect().position + Vector2(text_w + 30.0, label.size.y * 0.5)
+	_float_number(fx_layer, "%+d" % delta, at, color)
+	label.add_theme_color_override("font_color", color)
+	var tw := create_tween()
+	tw.tween_method(func(v: float): label.text = str(roundi(v)), float(from_money), float(to_money), 0.6).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(0.6)
+	tw.tween_callback(func(): label.add_theme_color_override("font_color", UiKit.GOLD))
+
+
+## A number that pops in beside the gold, drifts up a little (not far enough to cover the planner's name
+## or status) and fades out.
+func _float_number(parent: Control, text: String, at: Vector2, color: Color) -> void:
+	var l := UiKit.outline(UiKit.label(text, 26, color, "display_bold"), 8)
+	parent.add_child(l)
+	l.reset_size()
+	l.position = at - l.size / 2.0
+	l.pivot_offset = l.size / 2.0
+	l.scale = Vector2.ONE * 0.5
+	var tw := l.create_tween().set_parallel()
+	tw.tween_property(l, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(l, "position:y", l.position.y - 5.0, 1.6).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(l, "modulate:a", 0.0, 0.5).set_delay(1.3)
+	tw.chain().tween_callback(l.queue_free)
 
 
 func _make_card(i: int) -> Dictionary:
@@ -56,7 +101,7 @@ func _make_card(i: int) -> Dictionary:
 	h.add_theme_constant_override("separation", 12)
 	pc.add_child(h)
 	var mini := MatView.new()
-	mini.setup(23, 2, TileView.Mode.MINI, false)
+	mini.setup(11, 2, TileView.Mode.MINI, false)
 	h.add_child(mini)
 	var badge := _make_badge()
 	mini.add_child(badge)
@@ -65,7 +110,7 @@ func _make_card(i: int) -> Dictionary:
 	info.add_theme_constant_override("separation", 2)
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var top := HBoxContainer.new()
-	var name := UiKit.label(p.name, 21, UiKit.LIMESTONE, "display_bold")
+	var name := UiKit.label(p.name, 18, UiKit.LIMESTONE, "display_bold")
 	name.clip_text = true
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(name)
@@ -75,15 +120,18 @@ func _make_card(i: int) -> Dictionary:
 	var money := HBoxContainer.new()
 	money.add_theme_constant_override("separation", 4)
 	money.add_child(UiKit.icon("res://assets/ui/coin.svg", 20))
-	var money_l := UiKit.label("", 17, UiKit.GOLD, "display_bold")
+	var money_l := UiKit.label("", 15, UiKit.GOLD, "display_bold")
 	money.add_child(money_l)
 	if p.is_bot():
 		money.add_child(UiKit.spacer())
-		money.add_child(UiKit.chip("%s bot" % Bot.level_name(p.bot_level), UiKit.PANEL_HI, UiKit.MUTED, 12))
+		money.add_child(UiKit.chip("%s bot" % Bot.level_name(p.bot_level), UiKit.PANEL_HI, UiKit.MUTED, 11))
 	info.add_child(money)
-	var score_l := UiKit.label("", 15, UiKit.LIMESTONE)
+	var score_l := UiKit.label("", 13, UiKit.LIMESTONE)
+	var poll_l := UiKit.label("", 12, UiKit.MUTED)
+	for l in [score_l, poll_l, money_l]:
+		l.clip_text = true
+		l.custom_minimum_size.x = 100
 	info.add_child(score_l)
-	var poll_l := UiKit.label("", 14, UiKit.MUTED)
 	info.add_child(poll_l)
 	h.add_child(info)
 
@@ -114,7 +162,7 @@ func _refresh_card(i: int, pos: int) -> void:
 	var r: Dictionary = _gs.score(i)
 	ref["mini"].refresh(p.cells, r)
 	ref["money"].text = str(p.money)
-	ref["score"].text = "%s now, %d citizen%s" % [Describe.points(r["total"]), r["citizens"], "" if r["citizens"] == 1 else "s"]
+	ref["score"].text = "%s, %d citizen%s" % [Describe.points(r["total"]), r["citizens"], "" if r["citizens"] == 1 else "s"]
 	ref["pollution"].text = "Pollution %d%s" % [r["pollution"], ", %d loan%s" % [p.loans, "" if p.loans == 1 else "s"] if p.loans > 0 else ""]
 	var current: bool = i == _gs.current_index()
 	ref["status"].text = _status_text(current, pos)

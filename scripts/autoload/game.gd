@@ -1,6 +1,6 @@
 extends Node
-## Holds the seat setup, the running game and player options between scenes,
-## plus fade transitions.
+## Holds the seat setup, the running game and player options between scenes.
+## Scene changes go through the Transition autoload.
 
 const GameState = preload("res://scripts/core/game_state.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
@@ -11,7 +11,8 @@ const FINAL_SCENE := "res://scenes/final.tscn"
 const SETTINGS_PATH := "user://settings.cfg"
 
 ## Pause between bot actions, by the "bot speed" option (slow, normal, fast).
-const BOT_DELAY := [1.7, 1.0, 0.45]
+## Slow, Normal, Fast, Instant. Instant does not show what the bots do at all.
+const BOT_DELAY := [1.7, 1.0, 0.45, 0.0]
 
 ## [{ "name": String, "color": int, "bot": int }] for 2-4 seats, edited on the title screen.
 ## bot is 0 for a human, otherwise Bot.EASY / MEDIUM / HARD.
@@ -21,7 +22,6 @@ var seats: Array = [
 ]
 var state: GameState
 var theme: Theme
-
 ## Player options, saved to user://settings.cfg.
 var settings := {
 	"fullscreen": false,
@@ -30,23 +30,11 @@ var settings := {
 	"muted": false,
 	"bot_speed": 1,
 	"fast_animations": false,
+	"antialiasing": true,
 }
-
-var _fade: ColorRect
-var _busy := false
-
 
 func _ready() -> void:
 	theme = UiKit.build_theme()
-	var layer := CanvasLayer.new()
-	layer.layer = 100
-	add_child(layer)
-	_fade = ColorRect.new()
-	_fade.color = UiKit.INK_DEEP
-	_fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_fade.modulate.a = 0.0
-	layer.add_child(_fade)
 	_load_settings()
 	apply_settings()
 	# Automated playtest: godot --path . -- --tour=<dir> (see tests/visual_tour.gd)
@@ -55,6 +43,18 @@ func _ready() -> void:
 			var tour: Node = load("res://tests/visual_tour.gd").new()
 			tour.out_dir = arg.substr(7)
 			add_child(tour)
+		elif arg == "--probe=popups":
+			add_child(load("res://tests/popup_probe.gd").new())
+		elif arg == "--probe=cards":
+			add_child(load("res://tests/card_probe.gd").new())
+		elif arg == "--probe=gold":
+			add_child(load("res://tests/gold_probe.gd").new())
+		elif arg == "--probe=close":
+			add_child(load("res://tests/close_probe.gd").new())
+		elif arg == "--probe=click":
+			add_child(load("res://tests/click_probe.gd").new())
+		elif arg == "--probe=shots":
+			add_child(load("res://tests/shot_probe.gd").new())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -82,10 +82,16 @@ func apply_settings() -> void:
 	AudioServer.set_bus_mute(0, vol <= 0.0)
 	Sfx.muted = settings["muted"]
 	Engine.time_scale = 1.6 if settings["fast_animations"] else 1.0
+	get_viewport().msaa_2d = Viewport.MSAA_4X if settings["antialiasing"] else Viewport.MSAA_DISABLED
 
 
 func bot_delay() -> float:
-	return BOT_DELAY[clampi(settings["bot_speed"], 0, 2)]
+	return BOT_DELAY[clampi(settings["bot_speed"], 0, BOT_DELAY.size() - 1)]
+
+
+## True when bots should play without being watched: the bot speed option is Instant.
+func bot_instant() -> bool:
+	return settings["bot_speed"] >= BOT_DELAY.size() - 1
 
 
 func _load_settings() -> void:
@@ -123,19 +129,6 @@ func new_game() -> void:
 	state.setup(names, colors, -1, bots)
 
 
+## Changes the scene with the tile transition. Ignored while a change is already running.
 func goto(scene_path: String) -> void:
-	if _busy:
-		return
-	_busy = true
-	_fade.mouse_filter = Control.MOUSE_FILTER_STOP
-	var tw := create_tween()
-	tw.tween_property(_fade, "modulate:a", 1.0, 0.35)
-	await tw.finished
-	get_tree().change_scene_to_file(scene_path)
-	await get_tree().process_frame
-	await get_tree().process_frame
-	tw = create_tween()
-	tw.tween_property(_fade, "modulate:a", 0.0, 0.45)
-	await tw.finished
-	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_busy = false
+	Transition.change_scene(scene_path)

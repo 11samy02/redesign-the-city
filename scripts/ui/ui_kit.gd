@@ -112,6 +112,13 @@ static func spacer(vertical := false) -> Control:
 
 
 ## kind: "primary" (bougainvillea), "secondary", "gold" or "ghost".
+## Plays a sound through the Sfx autoload when there is one (the headless tests run without it).
+static func play_sfx(sound: String) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null and tree.root.has_node("Sfx"):
+		tree.root.get_node("Sfx").play(sound)
+
+
 static func button(text: String, kind := "secondary", font_size := 20) -> Button:
 	var b := Button.new()
 	b.text = text
@@ -124,11 +131,11 @@ static func button(text: String, kind := "secondary", font_size := 20) -> Button
 	b.mouse_entered.connect(func():
 		if b.disabled:
 			return
-		Sfx.play("hover")
+		play_sfx("hover")
 		b.create_tween().tween_property(b, "scale", Vector2.ONE * 1.04, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT))
 	b.mouse_exited.connect(func():
 		b.create_tween().tween_property(b, "scale", Vector2.ONE, 0.12))
-	b.pressed.connect(func(): Sfx.play("click"))
+	b.pressed.connect(func(): play_sfx("click"))
 	return b
 
 

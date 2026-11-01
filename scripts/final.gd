@@ -10,6 +10,7 @@ const FinalColumn = preload("res://scripts/final/final_column.gd")
 const ScoreboardOverlay = preload("res://scripts/final/scoreboard_overlay.gd")
 const ReflectionOverlay = preload("res://scripts/final/reflection_overlay.gd")
 const DemoGame = preload("res://scripts/final/demo_game.gd")
+const CardHistoryOverlay = preload("res://scripts/final/card_history_overlay.gd")
 
 var gs: GameState
 ## One scoring result per player, in seat order.
@@ -54,8 +55,10 @@ func goto(mode: String) -> void:
 		reflection.back_pressed.connect(func(): goto("results"))
 		reflection.cities_pressed.connect(func(): goto("cities"))
 		overlays.add_child(reflection)
-	scoreboard.visible = mode == "results"
-	_dock.visible = mode == "cities"
+	if scoreboard != null:
+		scoreboard.visible = mode == "results"
+	if _dock != null:
+		_dock.visible = mode == "cities"
 	if reflection != null:
 		reflection.visible = mode == "reflect"
 	if mode != "results":
@@ -112,7 +115,7 @@ func _build_head() -> Control:
 	var titles := VBoxContainer.new()
 	titles.add_theme_constant_override("separation", -4)
 	titles.add_child(UiKit.label("Final scoring", 48, UiKit.LIMESTONE, "display_bold"))
-	titles.add_child(UiKit.label("Every citizen scores their happiness. Every loan costs 2 points.", 18, UiKit.MUTED))
+	titles.add_child(UiKit.label("Every citizen scores their happiness. Every loan costs points, and each one costs more than the last.", 18, UiKit.MUTED))
 	head.add_child(titles)
 	head.add_child(UiKit.spacer())
 	_skip_btn = UiKit.button("Skip counting", "ghost", 18)
@@ -128,9 +131,10 @@ func _build_columns() -> Control:
 	row.add_theme_constant_override("separation", 18)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var n := gs.players.size()
-	var cell := 78.0 if n <= 3 else 66.0
+	var cell := 38.0  # the same for every player count: the footer buttons must stay on screen
 	for i in n:
 		var col := FinalColumn.new(gs.players[i], results[i], cell, tooltip)
+		col.cards_pressed.connect(show_cards.bind(i))
 		columns.append(col)
 		row.add_child(col)
 	return row
@@ -198,7 +202,15 @@ func _show_scoreboard() -> void:
 	scoreboard.cities_pressed.connect(func(): goto("cities"))
 	scoreboard.again_pressed.connect(_play_again)
 	scoreboard.menu_pressed.connect(_to_menu)
+	scoreboard.cards_pressed.connect(show_cards)
 	overlays.add_child(scoreboard)
+
+
+## Opens the list of cards planner `index` drew, on top of whatever is showing.
+func show_cards(index: int) -> void:
+	tooltip.hide_tip()
+	Sfx.play("click")
+	overlays.add_child(CardHistoryOverlay.new(gs, index))
 
 
 func _play_again() -> void:
