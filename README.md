@@ -1,25 +1,84 @@
-# Redesign the City (dev)
+<p align="center">
+  <img src="media/title.png" alt="Redesign the City title screen" width="100%">
+</p>
 
-A city-building board game about streets, shade and green space in Egkomi, Nicosia. 1 to 4 planners on one computer, built with **Godot 4.7** (GDScript, no plugins).
+<h1 align="center">Redesign the City</h1>
 
-The public page, with downloads, is [redesign-the-city](https://github.com/11samy02/redesign-the-city).
+<p align="center">
+  A city-building board game about streets, shade and green space in Egkomi, Nicosia.<br>
+  1 to 4 players on one computer.
+</p>
 
-## The game in short
+<p align="center">
+  <a href="https://github.com/11samy02/redesign-the-city/releases/latest"><b>Download 3.0 for Windows</b></a>
+</p>
 
-- Each planner builds a city on a **14x14 mat** over **8 rounds**, buying **4 tiles a turn** from a shared construction site (222 tiles in the bag) with 100 starting gold. Tiles are **1:1** (one square: small homes, kiosks, trees, roads...) or **2:2** (four squares: large homes, university, hospital, park...). Before a game, **Select map** on the title screen opens a grid of mats. You can build your own in the **mat editor** (no gold limits, 1:1 and big 2:2 streets); its tiles start on every planner's mat and cannot be replaced. Custom mats are saved in the user folder and can be edited or deleted; a `PlayerMatPreset` resource dropped into `resources/mats/` would appear under "Game mats" (none ship at the moment).
-- **Homes** bring citizens. Every citizen has a role (student, worker, child, older resident, resident with a disability, international resident) with two needs, a few likes and a dislike. Needs are met by walking along **roads** to the right place, or by a **park** within 2 squares of the home.
-- **Green space** cheers up neighbours and cuts **pollution**. Long walks without shade overheat citizens.
-- Each citizen scores their happiness (-5 to +5) as points. Extras: a **variety bonus** for a mix of happy citizen kinds, **loan penalties** (6, 9, 12, ...), and a penalty for services no home can reach.
-- A **hospital** and a **supermarket** meet the same need as a clinic and a market, and give +1 happiness to each citizen they serve.
-- Every turn a coin flip picks an **event** or **penalty card** (32 each). Hidden **circumstance cards** (24) are revealed over the game and change the rules for everyone. Every card answers at least one of the game's four objectives (tagged in the card data, not printed on the card).
-- Play with friends, or solo against **Easy, Medium and Hard bots**. The bots plan a whole city with simulated annealing, scored with the real scoring code.
+---
 
-## Run it
+## How it plays
 
-1. Install [Godot 4.7](https://godotengine.org/download).
-2. Open this folder as a project and press F5 (main scene: `scenes/title.tscn`).
+Every round, each planner buys 4 tiles from a shared construction site and builds them on their own 14x14 city. Tiles are 1:1 (one square: small homes, kiosks, trees, roads) or 2:2 (four squares: large homes, university, hospital, park). Homes bring citizens. Everything else keeps them happy.
 
-Export for Windows: Project > Export > "Windows Desktop" (the preset writes to `../build/RedesignTheCity.exe`).
+- **Six kinds of citizen**: students, workers, children, older residents, residents with a disability and expats. Each one needs two things nearby (a university and a library, a school and a park, a clinic and a market...), likes a few others, and dislikes one.
+- **Roads** link homes to the places their citizens need. A long walk with no shade heats them up.
+- **Parks and trees** cheer up neighbours, clean the air and shade the roads next to them.
+- **Your own start mats**: build a mat in the editor, with streets and buildings that are already there when the game starts, and pick it on the title screen.
+- **Pollution** starts high and drags everyone's mood down until you plant green.
+- **Pricier is better**: a hospital or a supermarket does the same job as a clinic or a market, and also gives +1 happiness to every citizen it serves.
+- **Gold** is tight. A loan helps now but costs more points with every one you take.
+- **Cards**: every turn a coin flip picks an event or a penalty card. Hidden circumstance cards, like a heatwave or a flu wave, are revealed round by round and change the rules for everyone.
+
+After 8 rounds every citizen scores their happiness, from -5 to +5. A mix of happy citizens earns a variety bonus. The happiest city wins.
+
+<p align="center">
+  <img src="media/city.png" alt="Three finished cities with their final scores" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td><img src="media/turn-order.png" alt="Round banner with the new turn order"></td>
+    <td><img src="media/card.png" alt="A penalty card drawn at the start of a turn"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="media/scoring.png" alt="Final scoring, with the winner and the circumstance cards of the game"></td>
+  </tr>
+</table>
+
+## Build your own mat
+
+Press **Select map** on the title screen to choose where everyone builds. **Game mats** come with the game. **Your mats** are the ones you made: the first card, **New mat**, opens the mat editor. Picking a card switches the mat at once and the window stays open, so you can try a few.
+
+<p align="center">
+  <img src="media/mat-picker.png" alt="The map picker with the Your mats tab open" width="100%">
+</p>
+
+The editor has no gold limits. Pick any tile on the left, including 1:1 and big 2:2 streets, and click the board to place it. Drag to paint a row, right-click to erase, Ctrl+Z to undo. Name the mat and save it. Tiles you place stay on every planner's mat from the first turn and cannot be replaced, so leave room (at least 80 free squares) to build around them. Saved mats can be edited or deleted from the picker.
+
+<p align="center">
+  <img src="media/editor.png" alt="The mat editor with a city on the board" width="100%">
+</p>
+
+## Features
+
+- Pass-and-play for 2 to 4 people, or play solo against Easy, Medium and Hard bots that plan whole cities
+- A mat editor and a map picker: build, name, edit and delete your own start mats
+- 64 event and penalty cards, plus 24 hidden circumstances
+- Hover any tile to see exactly what it does in your city right now
+- Points preview before you build, with live routes, shade and citizen moods
+- "Name the one change" at the end: each planner picks what would have added the most points
+- Full mouse or keyboard control
+- Options for fullscreen, volume, bot speed and animation speed
+
+## Play
+
+1. Download the zip from the [latest release](https://github.com/11samy02/redesign-the-city/releases/latest).
+2. Unzip it and run `RedesignTheCity.exe`.
+
+Windows 10 or 11, 64-bit. Nothing to install. The **How to play** screen in the game explains every rule.
+
+## Build it yourself
+
+The game is made with **Godot 4.7** (GDScript, no plugins). Install [Godot 4.7](https://godotengine.org/download), open this folder as a project and press F5 (main scene: `scenes/title.tscn`). Export for Windows: Project > Export > "Windows Desktop".
 
 ## Tests and tools
 
