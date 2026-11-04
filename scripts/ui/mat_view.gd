@@ -33,6 +33,7 @@ var _ghost_tile = null
 var _ghost_anchor := -1
 ## When the ghost replaces a bigger tile: that tile's size, so the squares it gives up can be marked too.
 var _ghost_replaced_n := 0
+var _ghost_replaced_at := -1
 var _ghost_valid := true
 var _ghost_mask := 15
 var _ghost_t := 0.0
@@ -67,6 +68,17 @@ func setup(cell_size: float, cell_gap: float, mode: int, interactive := true) ->
 
 func cell_pos(i: int) -> Vector2:
 	return Vector2(pad + (i % N) * (cell + gap), pad + (i / N) * (cell + gap))
+
+
+## The square under a screen position, or -1 when it is outside the squares.
+func square_at(global_pos: Vector2) -> int:
+	var local := global_pos - get_global_rect().position
+	var step := cell + gap
+	var x := int(floor((local.x - pad) / step))
+	var y := int(floor((local.y - pad) / step))
+	if x < 0 or y < 0 or x >= N or y >= N:
+		return -1
+	return y * N + x
 
 
 ## Pixels along one side of a tile that covers `n` squares.
@@ -263,8 +275,9 @@ func set_targets(on: bool, size := 1) -> void:
 
 ## Shows `tile` floating over the squares where it would go, with its top-left square on `at`. A ghost that
 ## does not fit is drawn red. `tile` null removes it.
-func set_ghost(tile, at: int, valid := true, replaced_n := 0) -> void:
+func set_ghost(tile, at: int, valid := true, replaced_n := 0, replaced_at := -1) -> void:
 	_ghost_replaced_n = replaced_n
+	_ghost_replaced_at = replaced_at
 	_ghost_tile = tile
 	_ghost_anchor = at if tile != null else -1
 	_ghost_valid = valid
@@ -310,12 +323,18 @@ func _draw_ghost() -> void:
 	var radius := int(r.size.x * 0.11)
 	if _ghost_valid and _ghost_replaced_n > n:
 		# the tile being replaced is bigger: it leaves, so the whole of it is marked and only one square is taken
-		var old := Rect2(r.position, Vector2(span(_ghost_replaced_n), span(_ghost_replaced_n)))
-		_overlay.draw_style_box(UiKit.box(Color(UiKit.HEAT, 0.16), radius, 2, Color(UiKit.HEAT, 0.7)), old)
+		var old := Rect2(cell_pos(_ghost_replaced_at), Vector2(span(_ghost_replaced_n), span(_ghost_replaced_n)))
+		# darkened, so the one square the new tile takes (drawn next in gold) stands out on it
+		_overlay.draw_style_box(UiKit.box(Color(UiKit.INK_DEEP, 0.5), radius, 2, Color(UiKit.HEAT, 0.8)), old)
 	if _ghost_valid:
 		# the tile itself follows the cursor (see Game); here only the squares it will cover are marked
 		var a := 0.55 + 0.35 * sin(_ghost_t * 6.0)
-		_overlay.draw_style_box(UiKit.box(Color(UiKit.GOLD, 0.16), radius, 3, Color(UiKit.GOLD, a)), r)
+		if _ghost_replaced_n > n:
+			# on a bigger tile that is leaving: a brighter, thicker marker on the one square the new tile takes
+			a = 0.85 + 0.15 * sin(_ghost_t * 6.0)
+			_overlay.draw_style_box(UiKit.box(Color(UiKit.GOLD, 0.3), radius, 4, Color(UiKit.GOLD, a)), r)
+		else:
+			_overlay.draw_style_box(UiKit.box(Color(UiKit.GOLD, 0.16), radius, 3, Color(UiKit.GOLD, a)), r)
 	else:
 		_overlay.draw_style_box(UiKit.box(Color(UiKit.HEAT, 0.3), radius, 3, Color(UiKit.HEAT, 0.9)), r)
 

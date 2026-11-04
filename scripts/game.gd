@@ -55,6 +55,7 @@ var busy := false
 var modal_count := 0
 var turn_bought: Array = []
 var hover_cell := -1
+var _pointed_square := -1
 ## True while a computer planner is taking its turn; locks human input.
 var bot_active := false
 var handoff_open := false
@@ -385,14 +386,13 @@ func _held_goal() -> Dictionary:
 	if kb.on and kb.area == "mat":
 		point = kb.mat
 	elif not kb.on and hover_cell >= 0:
-		point = hover_cell
+		point = _refine(hover_cell)
 	var at := -1
 	if point >= 0:
 		at = Grid.find_anchor(cells, point, n)
-		if at < 0 and cells[point] != null and hand.get("type", "") == "shop":
-			var old := Grid.anchor_of(cells, point)
-			if gs.can_replace(hand["slot"], old):
-				at = old
+		if at < 0 and cells[point] != null and hand.get("type", "") == "shop" and gs.can_replace(hand["slot"], point):
+			# over a tile of yours that this one may replace: it stands on the square pointed at
+			at = gs.replace_anchor(hand["slot"], point)
 	if at >= 0:
 		var r: Rect2 = mat_view.footprint_global_rect(at, n)
 		return {"center": r.get_center(), "side": r.size.x, "snapped": true}
@@ -402,7 +402,27 @@ func _held_goal() -> Dictionary:
 	return {"center": get_viewport().get_mouse_position() + Vector2(side, side) * -0.15, "side": side, "snapped": false}
 
 
+## A tile on the mat is one view, so the pointer reports its top-left square. When the mouse is over the tile, this
+## gives the square it is really on (a small tile can replace any square of a big one).
+func _refine(i: int) -> int:
+	if i < 0 or kb.on:
+		return i
+	var cells: Array = gs.current_player().cells
+	var sq := mat_view.square_at(get_viewport().get_mouse_position())
+	if sq >= 0 and sq != i and Grid.anchor_of(cells, sq) == Grid.anchor_of(cells, i) and Grid.anchor_of(cells, i) >= 0:
+		return sq
+	return i
+
+
 func _process(delta: float) -> void:
+	# moving over the squares of one big tile changes which square a replacement would take
+	if hover_cell >= 0 and not hand.is_empty() and not kb.on and gs.pending_losses.is_empty():
+		var sq := _refine(hover_cell)
+		if sq != _pointed_square:
+			_pointed_square = sq
+			focus_cell(sq)
+	else:
+		_pointed_square = -1
 	if _held == null or not _held.visible:
 		return
 	_held_t += delta
@@ -435,7 +455,7 @@ func set_hand(h: Dictionary) -> void:
 			kb.mat = spots[0] if not spots.is_empty() else gs.current_player().cells.find(null)
 		_update_kb_focus()
 	if hover_cell >= 0:
-		focus_cell(hover_cell)
+		focus_cell(_refine(hover_cell))
 	_update_actions()
 
 
@@ -464,7 +484,7 @@ func focus_slot(i: int) -> void:
 func _on_cell_hovered(i: int, inside: bool) -> void:
 	if inside:
 		hover_cell = i
-		focus_cell(i)
+		focus_cell(_refine(i))
 	elif hover_cell == i:
 		hover_cell = -1
 		unfocus_cell()
@@ -486,8 +506,8 @@ func focus_cell(square: int) -> void:
 	if t != null and i < 0:
 		_preview_build(t, cells, square)
 		return
-	if t != null and hand["type"] == "shop" and gs.can_replace(hand["slot"], i):
-		_preview_build(t, cells, i, true)
+	if t != null and hand["type"] == "shop" and gs.can_replace(hand["slot"], square):
+		_preview_build(t, cells, square, true)
 		return
 	mat_view.set_ghost(null, -1)
 	_preview_label.visible = false
@@ -500,10 +520,11 @@ func focus_cell(square: int) -> void:
 
 
 ## Ghost tile, floating point change and tooltip for building `t` where the planner points: on the empty
-## square `i`, or (when `replacing`) over the tile whose top-left square is `i`.
+## square, or (when `replacing`) in the place of the tile on the pointed square.
 func _preview_build(t: Dictionary, cells: Array, square: int, replacing := false) -> void:
 	var size := TileDefs.footprint(t)
-	var i := square if replacing else Grid.find_anchor(cells, square, size)
+	var i := gs.replace_anchor(hand["slot"], square) if replacing else Grid.find_anchor(cells, square, size)
+	var old_at := Grid.anchor_of(cells, square) if replacing else -1
 	if i < 0:
 		# no room for the footprint here: show a red outline and say so
 		var at := Grid.ghost_anchor(square, size)
@@ -518,9 +539,9 @@ func _preview_build(t: Dictionary, cells: Array, square: int, replacing := false
 		tooltip.hide_tip()
 		return
 	var rect := mat_view.footprint_global_rect(i, size)
-	var preview := _with(cells, i, t, replacing)
+	var preview := _with(cells, i, t, old_at)
 	var pr := Scoring.evaluate(preview, gs.current_player().loans, gs.revealed, gs.current_player().card_points)
-	mat_view.set_ghost(t, i, true, TileDefs.footprint(cells[i]) if replacing else 0)
+	mat_view.set_ghost(t, i, true, TileDefs.footprint(cells[old_at]) if replacing else 0, old_at)
 	Influence.show_for(mat_view, preview, pr, i)
 	var delta: int = pr["total"] - result["total"]
 	_preview_label.text = Describe.points(delta) if delta != 0 else "No change"
@@ -543,11 +564,12 @@ func unfocus_cell() -> void:
 		_show_loss_targets()
 
 
-## A copy of the mat with `tile` built on top-left square `i`; `replacing` takes the tile that stands there away first.
-static func _with(cells: Array, i: int, tile: Dictionary, replacing := false) -> Array:
+## A copy of the mat with `tile` built on top-left square `i`; `remove_at` (a tile's top-left square) takes that tile
+## away first, for a replacement.
+static func _with(cells: Array, i: int, tile: Dictionary, remove_at := -1) -> Array:
 	var c := cells.duplicate()
-	if replacing:
-		Grid.remove(c, i)
+	if remove_at >= 0:
+		Grid.remove(c, remove_at)
 	Grid.place(c, i, tile)
 	return c
 
@@ -609,6 +631,7 @@ func _reject(view, msg: String) -> void:
 
 
 func _on_cell_pressed(square: int) -> void:
+	square = _refine(square)
 	var cells: Array = gs.current_player().cells
 	var i := Grid.anchor_of(cells, square)
 	if not gs.pending_losses.is_empty():
@@ -621,8 +644,8 @@ func _on_cell_pressed(square: int) -> void:
 			show_toast("Pick a tile from the construction site first.")
 		return
 	if i >= 0:
-		if hand["type"] == "shop" and gs.can_replace(hand["slot"], i):
-			_replace(i)
+		if hand["type"] == "shop" and gs.can_replace(hand["slot"], square):
+			_replace(square)
 		elif hand["type"] == "shop" and gs.current_player().replaced:
 			_reject(mat_view.views[i], "You already replaced a tile. Choose an empty lot.")
 		elif cells[i].get("fixed", false):
@@ -644,7 +667,7 @@ func _on_cell_pressed(square: int) -> void:
 ## construction site. Allowed once per planner and game.
 func _replace(cell: int) -> void:
 	var h := hand
-	var old: Dictionary = gs.current_player().cells[cell]
+	var old: Dictionary = gs.current_player().cells[Grid.anchor_of(gs.current_player().cells, cell)]
 	var tile: Dictionary = _hand_tile()
 	var yes = await _ask("Replace this tile?",
 		"The %s makes room for your %s, which you pay for as usual and which counts as one of your buys. The %s goes back to the construction site. You can only do this once in the whole game." % [
@@ -657,12 +680,13 @@ func _replace(cell: int) -> void:
 	var before: int = result["total"]
 	var before_poll: int = result["pollution"]
 	var from_rect := _take_from_hand(h)
-	var to_rect := mat_view.footprint_global_rect(cell, TileDefs.footprint(tile))
+	var at := gs.replace_anchor(h["slot"], cell)
+	var to_rect := mat_view.footprint_global_rect(at, TileDefs.footprint(tile))
 	var cost := gs.price_of(tile)
 	TileFx.fly_coins(fx, banner.coin_center(), from_rect.get_center(), cost)
 	banner.animate_money(gs.current_player().money - cost)
 	Sfx.play("whoosh")
-	await TileFx.fly_tile(fx, TileDefs.art_path(tile, MatView.road_mask(_with(gs.current_player().cells, cell, tile, true), cell)), from_rect, to_rect)
+	await TileFx.fly_tile(fx, TileDefs.art_path(tile, MatView.road_mask(_with(gs.current_player().cells, at, tile, Grid.anchor_of(gs.current_player().cells, cell)), at)), from_rect, to_rect)
 	var removed := gs.replace_tile(h["slot"], cell)
 	assert(not removed.is_empty(), "replacement rejected after validation")
 	turn_bought.append(tile)
@@ -672,7 +696,7 @@ func _replace(cell: int) -> void:
 	busy = false
 	refresh_all()
 	busy = true
-	_pop_placed(cell)
+	_pop_placed(at)
 	Sfx.play("place")
 	TileFx.landed(fx, tile, to_rect, result["total"] - before, result["pollution"] - before_poll, banner.gauge_center())
 	await TileFx.fly_tile(fx, TileDefs.art_path(removed), to_rect, back_rect)
@@ -685,7 +709,7 @@ func _replace(cell: int) -> void:
 		kb.area = "shop" if gs.can_buy() else "mat"
 		_update_kb_focus()
 	elif hover_cell >= 0:
-		focus_cell(hover_cell)
+		focus_cell(_refine(hover_cell))
 
 
 ## The construction site stack a tile belongs to, or -1.
@@ -734,7 +758,7 @@ func commit(cell: int) -> void:
 		kb.area = "shop" if gs.can_buy() else "mat"
 		_update_kb_focus()
 	elif hover_cell >= 0:
-		focus_cell(hover_cell)
+		focus_cell(_refine(hover_cell))
 
 
 ## Empties the hand and returns the screen rect the tile flies out of.

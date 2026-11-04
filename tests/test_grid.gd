@@ -126,6 +126,23 @@ func test_replacing_a_tile_needs_the_new_one_to_fit() -> void:
 	eq(Grid.anchor_of(gs2.current_player().cells, 15), 0, "the park covers four squares")
 
 
+func test_a_small_tile_replacing_a_big_one_goes_where_the_planner_points() -> void:
+	for square in [0, 1, 14, 15]:
+		var gs := _game()
+		var kiosk := _slot(gs, K.KIOSK)
+		check(gs.buy_and_place(_slot(gs, K.PARK), 0), "a park on the corner")
+		check(gs.can_replace(kiosk, square), "a kiosk may replace it, pointing at square %d" % square)
+		eq(gs.replace_anchor(kiosk, square), square, "and it stands on square %d" % square)
+		var old := gs.replace_tile(kiosk, square)
+		eq(old["kind"], K.PARK, "the park went back")
+		var cells: Array = gs.current_player().cells
+		eq(cells[square]["kind"], K.KIOSK, "the kiosk is on the pointed square")
+		eq(Grid.tiles(cells).size(), 1, "and only the kiosk is left")
+	var gs2 := _game()
+	check(gs2.buy_and_place(_slot(gs2, K.KIOSK), 15), "a kiosk")
+	eq(gs2.replace_anchor(_slot(gs2, K.PARK), 15), 15, "a bigger tile keeps the old top-left square when it fits")
+
+
 # ---------------------------------------------------------------- connections
 
 func test_a_road_touching_any_side_of_a_big_street_connects() -> void:

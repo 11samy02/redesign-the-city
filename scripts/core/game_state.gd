@@ -333,7 +333,8 @@ func buy_and_place(slot: int, cell: int) -> bool:
 ## Whether the picked shop tile may take the place of the tile on `cell` (any of its squares): once per
 ## planner and game, it must be bought like any tile (so it needs a buy and the gold), and only a tile that
 ## came out of the shop can go back into it (free roads, event gifts and prefixed tiles cannot). The new
-## tile must fit where the old one stood: its top-left square goes on the old tile's top-left square.
+## tile goes where the planner points (`cell`, one of the old tile's squares) as long as it fits once the old tile
+## is gone, so a small tile can take any square of a bigger one (see replace_anchor).
 func can_replace(slot: int, cell: int) -> bool:
 	var p := current_player()
 	if p.replaced or not can_buy() or not can_afford(slot) or cell < 0 or cell >= MAT_CELLS:
@@ -346,9 +347,7 @@ func can_replace(slot: int, cell: int) -> bool:
 		return false
 	if TileDefs.sort_key(old) == TileDefs.sort_key(shop[slot]["tile"]) or _stack_of(old) < 0:
 		return false
-	var trial := p.cells.duplicate()
-	Grid.remove(trial, anchor)
-	return Grid.fits(trial, anchor, TileDefs.footprint(shop[slot]["tile"]))
+	return replace_anchor(slot, cell) >= 0
 
 
 ## Buys the shop tile onto an occupied lot; the tile that stood there goes back into the construction
@@ -358,16 +357,34 @@ func replace_tile(slot: int, cell: int) -> Dictionary:
 		return {}
 	var p := current_player()
 	var anchor := Grid.anchor_of(p.cells, cell)
+	var at := replace_anchor(slot, cell)
 	var old: Dictionary = p.cells[anchor]
 	var tile: Dictionary = shop[slot]["tile"].duplicate()
 	p.money -= price_of(tile)
 	Grid.remove(p.cells, anchor)
-	Grid.place(p.cells, anchor, tile)
+	Grid.place(p.cells, at, tile)
 	shop[slot]["count"] -= 1
 	shop[_stack_of(old)]["count"] += 1
 	p.replaced = true
 	purchases += 1
 	return old
+
+
+## Where the shop tile in `slot` would stand if it replaced the tile covering `cell`, as its top-left square, or -1
+## when it does not fit. A tile at least as big as the old one keeps the old tile's top-left square when it fits
+## there; otherwise (and for a smaller tile) it takes the squares around the one the planner pointed at, so a
+## small tile can be put on any square of a bigger tile.
+func replace_anchor(slot: int, cell: int) -> int:
+	var p := current_player()
+	var anchor := Grid.anchor_of(p.cells, cell)
+	if anchor < 0:
+		return -1
+	var n := TileDefs.footprint(shop[slot]["tile"])
+	var trial := p.cells.duplicate()
+	Grid.remove(trial, anchor)
+	if n >= TileDefs.footprint(p.cells[anchor]) and Grid.fits(trial, anchor, n):
+		return anchor
+	return Grid.find_anchor(trial, cell, n)
 
 
 func _stack_of(tile: Dictionary) -> int:

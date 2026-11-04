@@ -51,15 +51,21 @@ func _run() -> void:
 	_scene._on_slot_pressed(small) if _scene.has_method("_on_slot_pressed") else _scene.set_hand({"type": "shop", "slot": small})
 	for i in 20:
 		await get_tree().process_frame
-	_scene._on_cell_hovered(anchor + 15, true)
+	# the real mouse cannot be moved from here, so point at the bottom-right square of the big tile directly
+	_scene.focus_cell(anchor + 15)
+	print("GHOST0 ", _scene.mat_view._ghost_anchor, " old ", _scene.mat_view._ghost_replaced_at, " n ", _scene.mat_view._ghost_replaced_n)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(OS.get_cmdline_user_args()[0].substr(6))
+	get_tree().quit()
+	return
 	for i in 40:
 		await get_tree().process_frame
 	var out := "replace.png"
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--out="):
 			out = a.substr(6)
+	print("GHOST ", _scene.mat_view._ghost_anchor, " old ", _scene.mat_view._ghost_replaced_at, " n ", _scene.mat_view._ghost_replaced_n, " hover ", _scene.hover_cell)
+	print("replace_anchor ", gs.replace_anchor(small, anchor + 15), " pointed ", _scene._pointed_square)
 	print("can_replace ", gs.can_replace(small, anchor), " hand ", _scene.hand)
-	var lc = _scene
-	print("COLS ", _scene.mat_view.get_global_rect(), " ", _scene.banner.get_global_rect(), " ", _scene._order_panel.get_parent().get_global_rect(), " ", _scene._shop_panel.view.get_global_rect(), " ", _scene._deck_penalty.get_global_rect())
 	get_viewport().get_texture().get_image().save_png(out)
 	get_tree().quit()
