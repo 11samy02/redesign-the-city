@@ -4,6 +4,7 @@ extends "res://tests/test_base.gd"
 const GameState = preload("res://scripts/core/game_state.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const MatLibrary = preload("res://scripts/core/mat_library.gd")
+const SampleMats = preload("res://tests/sample_mats.gd")
 const PrintTile = preload("res://scripts/ui/print_tile.gd")
 const PresetTile = preload("res://scripts/resources/preset_tile.gd")
 const PlayerMatPreset = preload("res://scripts/resources/player_mat_preset.gd")
@@ -212,16 +213,16 @@ func test_a_park_helps_homes_within_two_squares() -> void:
 # ---------------------------------------------------------------- prefixed mats
 
 func test_the_shipped_mats_are_valid() -> void:
-	var all := MatLibrary.all()
-	check(all.size() >= 2, "at least two prefixed mats ship with the game")
+	# the game ships no prefixed mats now; whatever is dropped into resources/mats must still be valid
+	var all: Array = MatLibrary.all() + SampleMats.all()
+	check(all.size() >= 2, "the sample mats exist")
 	for m in all:
 		eq(m.problems(), [] as Array[String], "%s has no overlapping or off-mat tiles" % m.title)
 		check(m.title != "" and m.description != "", "%s has a title and a description" % m.title)
 
 
-func test_the_southern_avenue_has_a_whole_street_and_a_university() -> void:
-	var mat = MatLibrary.by_path("res://resources/mats/01_southern_avenue.tres")
-	check(mat != null, "the mat loads")
+func test_the_sample_avenue_has_a_whole_street_and_a_university() -> void:
+	var mat = SampleMats.avenue()
 	var cells: Array = mat.build_cells()
 	for x in 14:
 		for y in [12, 13]:
@@ -236,7 +237,7 @@ func test_the_southern_avenue_has_a_whole_street_and_a_university() -> void:
 
 
 func test_every_player_starts_on_their_own_copy_of_the_mat() -> void:
-	var mat = MatLibrary.by_path("res://resources/mats/02_crossroads.tres")
+	var mat = SampleMats.crossroads()
 	var gs := _game(mat)
 	var a: Array = gs.players[0].cells
 	var b: Array = gs.players[1].cells
@@ -248,7 +249,7 @@ func test_every_player_starts_on_their_own_copy_of_the_mat() -> void:
 
 
 func test_prefixed_tiles_can_be_neither_replaced_nor_lost() -> void:
-	var mat = MatLibrary.by_path("res://resources/mats/01_southern_avenue.tres")
+	var mat = SampleMats.avenue()
 	var gs := _game(mat)
 	var uni := 6 * 14 + 12
 	check(not gs.can_replace(_slot(gs, K.PARK), uni), "the university is not replaceable")

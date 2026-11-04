@@ -6,7 +6,7 @@ const Scoring = preload("res://scripts/core/scoring.gd")
 const BotPlanner = preload("res://scripts/core/bot_planner.gd")
 const Roles = preload("res://scripts/core/roles.gd")
 const Legacy = preload("res://tests/legacy_cards.gd")
-const MatLibrary = preload("res://scripts/core/mat_library.gd")
+const SampleMats = preload("res://tests/sample_mats.gd")
 
 
 ## Whole-game tests that only check the rules (games finish, roads get spent) do not need Hard's
@@ -53,12 +53,12 @@ func _play_out(gs: GameState, rng: RandomNumberGenerator) -> bool:
 	return true
 
 
-## Bots build around the tiles a prefixed mat comes with, and a whole game finishes on every shipped mat.
-func test_bots_finish_games_on_every_prefixed_mat() -> void:
+## Bots build around the tiles a prefixed mat comes with, and a whole game finishes on every sample mat.
+func test_bots_finish_games_on_every_sample_mat() -> void:
 	_quick_search()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 8
-	for mat in MatLibrary.all():
+	for mat in SampleMats.all():
 		for level in [Bot.EASY, Bot.MEDIUM, Bot.HARD]:
 			var gs := GameState.new()
 			gs.setup(["A", "B"], [0, 1], 40 + level, [level, level], mat)

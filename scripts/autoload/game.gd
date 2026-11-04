@@ -33,7 +33,7 @@ var settings := {
 	"fast_animations": false,
 	"antialiasing": true,
 	## Path of the prefixed player mat everyone plays on (see MatLibrary); "" is an empty mat.
-	"mat": "res://resources/mats/01_southern_avenue.tres",
+	"mat": "",
 }
 
 func _ready() -> void:
@@ -64,6 +64,8 @@ func _ready() -> void:
 			add_child(load("res://tests/replace_probe.gd").new())
 		elif arg == "--probe=title":
 			add_child(load("res://tests/title_probe.gd").new())
+		elif arg == "--probe=matedit":
+			add_child(load("res://tests/mat_editor_probe.gd").new())
 		elif arg == "--probe=final":
 			add_child(load("res://tests/final_probe.gd").new())
 

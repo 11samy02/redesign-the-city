@@ -11,6 +11,9 @@ const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
 const Bot = preload("res://scripts/core/bot.gd")
 const MatView = preload("res://scripts/ui/mat_view.gd")
 const MatLibrary = preload("res://scripts/core/mat_library.gd")
+const CustomMats = preload("res://scripts/core/custom_mats.gd")
+const MatPicker = preload("res://scripts/ui/mat_picker.gd")
+const MatEditor = preload("res://scripts/ui/mat_editor.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const Grid = preload("res://scripts/core/grid.gd")
 
@@ -40,7 +43,7 @@ var _overlays: Control
 var _modal := false
 var _diorama: Control
 var _dio_views: Array = []
-var _mats: Array = []
+var _mat_name: Label
 var _mat_note: Label
 var _mat_preview: MatView
 
@@ -231,10 +234,13 @@ func _build_diorama() -> void:
 
 # ---------------------------------------------------------------- player mat
 
-## The "Player mat" part of the setup box: a drop-down of the prefixed mats (and an empty one), what the chosen
-## one holds, and a small picture of it. Everyone in the game builds on the chosen mat.
+## The "Player mat" part of the setup box: the name of the chosen mat, a "Select map" button that opens the picker
+## popup (see MatPicker), what the mat holds and a small picture of it. Everyone in the game builds on the chosen mat.
 func _build_mat_picker() -> Control:
-	_mats = MatLibrary.all()
+	# a saved choice that is gone (a deleted custom mat, or a game mat that no longer ships) falls back to the empty mat
+	var saved: String = Game.settings["mat"]
+	if saved != "" and MatLibrary.by_path(saved) == null:
+		Game.set_setting("mat", MatLibrary.DEFAULT)
 	var box := HBoxContainer.new()
 	box.add_theme_constant_override("separation", 16)
 	var col := VBoxContainer.new()
@@ -245,22 +251,22 @@ func _build_mat_picker() -> Control:
 	head.add_child(UiKit.label("Player mat", 20, UiKit.LIMESTONE, "display_bold"))
 	head.add_child(UiKit.label("the same for everyone", 14, UiKit.MUTED))
 	col.add_child(head)
-	var pick := OptionButton.new()
-	pick.add_item("Empty mat")
-	var current := 0
-	for k in _mats.size():
-		pick.add_item(_mats[k].title)
-		if _mats[k].resource_path == Game.settings["mat"]:
-			current = k + 1
-	pick.select(current)
-	pick.focus_mode = Control.FOCUS_NONE
-	pick.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	pick.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	pick.tooltip_text = "Some mats start with streets and buildings already built. They can't be replaced."
-	UiKit.style_button(pick, "secondary")
-	pick.add_theme_font_override("font", UiKit.font("display"))
-	pick.add_theme_font_size_override("font_size", 17)
-	pick.item_selected.connect(_on_mat_picked)
+	var pick := HBoxContainer.new()
+	pick.add_theme_constant_override("separation", 10)
+	var name_box := PanelContainer.new()
+	name_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var nb := UiKit.box(UiKit.INK_DEEP, 12, 2, UiKit.LINE, 10)
+	nb.content_margin_left = 16
+	name_box.add_theme_stylebox_override("panel", nb)
+	_mat_name = UiKit.label("", 20, UiKit.LIMESTONE, "display_bold")
+	_mat_name.clip_text = true
+	_mat_name.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_box.add_child(_mat_name)
+	pick.add_child(name_box)
+	var select := UiKit.button("Select map", "secondary", 18)
+	select.tooltip_text = "Choose a mat from the game or build your own"
+	select.pressed.connect(_open_mat_picker)
+	pick.add_child(select)
 	col.add_child(pick)
 	# one line, so the setup box keeps its height whatever mat is picked (the full text is the tooltip)
 	_mat_note = UiKit.label("", 15, UiKit.MUTED)
@@ -273,24 +279,58 @@ func _build_mat_picker() -> Control:
 	_mat_preview.setup(5.0, 1.0, TileView.Mode.MINI, false)
 	_mat_preview.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	box.add_child(_mat_preview)
-	_show_mat(current)
+	_show_mat()
 	return box
 
 
-func _on_mat_picked(index: int) -> void:
-	Sfx.play("click")
-	Game.set_setting("mat", _mats[index - 1].resource_path if index > 0 else "")
-	_show_mat(index)
-
-
-func _show_mat(index: int) -> void:
-	var preset = _mats[index - 1] if index > 0 else null
+## Shows the chosen mat (Game.settings["mat"]) in the setup box.
+func _show_mat() -> void:
+	var path: String = Game.settings["mat"]
+	var preset = MatLibrary.by_path(path)
 	var cells: Array = preset.build_cells() if preset != null else Grid.empty()
 	_mat_preview.refresh(cells, Scoring.evaluate(cells, 0))
+	_mat_name.text = "Empty mat" if preset == null else preset.title
 	var note: String = "A blank 14 x 14 mat. Build anywhere." if preset == null else preset.description
+	_mat_name.tooltip_text = _mat_name.text
+	_mat_name.mouse_filter = Control.MOUSE_FILTER_PASS
 	_mat_note.text = note
 	_mat_note.tooltip_text = note
 	_mat_note.mouse_filter = Control.MOUSE_FILTER_PASS
+
+
+## Opens the map picker. "New mat" and "Edit" open the editor and come back to the picker afterwards.
+func _open_mat_picker() -> void:
+	if _modal:
+		return
+	_modal = true
+	var focus := ""
+	while true:
+		var pk := MatPicker.new()
+		pk.current = Game.settings["mat"]
+		pk.focus_path = focus
+		pk.mat_deleted.connect(func(path: String):
+			if path == Game.settings["mat"]:
+				Game.set_setting("mat", MatLibrary.DEFAULT)
+				_show_mat())
+		pk.picked.connect(func(path: String):
+			Game.set_setting("mat", path)
+			_show_mat())
+		_overlays.add_child(pk)
+		var result: Dictionary = await pk.finished
+		focus = ""
+		match result["action"]:
+			"new", "edit":
+				var ed := MatEditor.new()
+				ed.edit_path = result.get("path", "")
+				_overlays.add_child(ed)
+				var saved: Dictionary = await ed.finished
+				if saved["saved"]:
+					focus = saved["path"]
+					# a mat that was open in the setup box may have changed
+					_show_mat()
+			_:
+				break
+	_modal = false
 
 
 # ---------------------------------------------------------------- seats

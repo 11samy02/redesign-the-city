@@ -4,11 +4,11 @@ extends SceneTree
 const GameState = preload("res://scripts/core/game_state.gd")
 const Bot = preload("res://scripts/core/bot.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
-const MatLibrary = preload("res://scripts/core/mat_library.gd")
+const SampleMats = preload("res://tests/sample_mats.gd")
 
 
 func _initialize() -> void:
-	for mat in MatLibrary.all():
+	for mat in SampleMats.all():
 		for level in [Bot.MEDIUM, Bot.HARD]:
 			var gs := GameState.new()
 			gs.setup(["A", "B"], [0, 1], 3, [level, level], mat)
