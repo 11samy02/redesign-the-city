@@ -1,4 +1,4 @@
-"""Generates every tile and UI SVG for Egkomi City.
+"""Generates every tile and UI SVG for Redesign the City.
 
 Run from the project root:  python tools/gen_art.py
 Tiles are 256x256 with an oblique (3/4) view for buildings and a top-down

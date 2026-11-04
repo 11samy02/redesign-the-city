@@ -59,11 +59,11 @@ func test_right_edge_of_a_shop_row_enters_the_mat_at_the_matching_height() -> vo
 	nav.area = "shop"
 	nav.shop = 13
 	nav.step(RIGHT)
-	eq(nav.mat, 14, "shop row 1 of 0-3 leads to mat row 2 of 0-6")
+	eq(nav.mat, 4 * 14, "shop row 1 of 0-3 leads to mat row 4 of 0-13")
 	nav.area = "shop"
 	nav.shop = 18
 	nav.step(RIGHT)
-	eq(nav.mat, 42, "the last shop row leads to the last mat row")
+	eq(nav.mat, 13 * 14, "the last shop row leads to the last mat row")
 
 
 func test_left_edge_of_the_mat_returns_to_the_shop() -> void:
@@ -72,24 +72,24 @@ func test_left_edge_of_the_mat_returns_to_the_shop() -> void:
 	nav.mat = 14
 	nav.step(LEFT)
 	eq(nav.area, "shop", "area")
-	eq(nav.shop, 13, "mat row 2 of 0-6 leads to the end of shop row 1")
+	eq(nav.shop, 6, "mat row 1 of 0-13 leads to the end of the first shop row")
 	nav.area = "mat"
-	nav.mat = 42
+	nav.mat = 13 * 14
 	nav.step(LEFT)
 	eq(nav.shop, 18, "last mat row leads to the last shop row")
 
 
-func test_mat_cursor_moves_and_clamps_on_7x7() -> void:
+func test_mat_cursor_moves_and_clamps_on_14x14() -> void:
 	var nav := _nav()
 	nav.area = "mat"
 	nav.mat = 8
 	nav.step(RIGHT)
 	nav.step(DOWN)
-	eq(nav.mat, 16, "moves right then down")
-	for k in 10:
+	eq(nav.mat, 23, "moves right then down")
+	for k in 20:
 		nav.step(RIGHT)
 		nav.step(DOWN)
-	eq(nav.mat, 48, "bottom-right corner holds")
+	eq(nav.mat, 195, "bottom-right corner holds")
 
 
 func test_an_empty_shop_layout_does_not_crash() -> void:

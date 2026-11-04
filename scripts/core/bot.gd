@@ -6,13 +6,15 @@ extends RefCounted
 const Scoring = preload("res://scripts/core/scoring.gd")
 const CardEffects = preload("res://scripts/core/card_effects.gd")
 const BotPlanner = preload("res://scripts/core/bot_planner.gd")
+const Grid = preload("res://scripts/core/grid.gd")
+const TileDefs = preload("res://scripts/core/tile_defs.gd")
 
 const EASY := 1
 const MEDIUM := 2
 const HARD := 3
 const LEVEL_NAMES := {EASY: "Easy", MEDIUM: "Medium", HARD: "Hard"}
 ## How much layout searching each level does, as a share of Hard's (see BotPlanner.COLD_ITERATIONS).
-const EFFORT := {EASY: 0.03, MEDIUM: 0.07, HARD: 1.0}
+const EFFORT := {EASY: 0.03, MEDIUM: 0.07, HARD: 0.65}
 
 
 static func level_name(level: int) -> String:
@@ -23,12 +25,9 @@ static func effort(level: int) -> float:
 	return BotPlanner.tune.get("effort%d" % level, EFFORT.get(level, 1.0))
 
 
-static func _empty_cells(cells: Array) -> Array[int]:
-	var out: Array[int] = []
-	for c in cells.size():
-		if cells[c] == null:
-			out.append(c)
-	return out
+## Every lot where a tile of `size` fits (the top-left square of its footprint).
+static func _empty_cells(cells: Array, size := 1) -> Array[int]:
+	return Grid.valid_anchors(cells, size)
 
 
 ## Does a turn's searching ahead of time, so a screen can run it off the main thread; the
@@ -48,14 +47,19 @@ static func choose_purchase(gs, level: int, rng: RandomNumberGenerator) -> Array
 	for s in gs.shop.size():
 		if gs.can_afford(s):
 			slots.append(s)
-	var empty := _empty_cells(gs.current_player().cells)
-	return [slots[rng.randi() % slots.size()], empty[rng.randi() % empty.size()]]
+	var offset := rng.randi() % maxi(1, slots.size())
+	for k in slots.size():
+		var s: int = slots[(k + offset) % slots.size()]
+		var empty := _empty_cells(gs.current_player().cells, TileDefs.footprint(gs.stack_tile(s)))
+		if not empty.is_empty():
+			return [s, empty[rng.randi() % empty.size()]]
+	return []
 
 
 ## Where a free tile from an event card goes: any empty lot for Easy, the plan's lot otherwise.
 static func choose_bonus_cell(gs, level: int, rng: RandomNumberGenerator) -> int:
 	var p = gs.current_player()
-	var empty := _empty_cells(p.cells)
+	var empty := _empty_cells(p.cells, TileDefs.footprint(p.bonus_tiles[0]) if not p.bonus_tiles.is_empty() else 1)
 	if empty.is_empty():
 		return -1
 	if level > EASY and not p.bonus_tiles.is_empty():

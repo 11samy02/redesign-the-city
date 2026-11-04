@@ -1,13 +1,14 @@
 extends RefCounted
-## Final-scoring rules for one 7x7 player mat. Happiness is worked out per citizen: every citizen
+## Final-scoring rules for one 14x14 player mat. Happiness is worked out per citizen: every citizen
 ## has a role (roles.gd) with two needs, a few likes and a dislike. Green space, pollution and
 ## heat are shared by everyone in a home.
 
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const Roles = preload("res://scripts/core/roles.gd")
 const CircumstanceDefs = preload("res://scripts/core/circumstance_defs.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
-const SIZE := 7
+const SIZE := Grid.SIZE
 const START_POLLUTION := 16
 ## Loan n costs LOAN_PENALTIES[n - 1] points; every loan after the last listed one costs 2 more.
 const LOAN_PENALTIES := [6, 9, 12]
@@ -16,8 +17,11 @@ const LOAN_STEP := 3
 const UNUSED_PENALTY := 1
 const HAPPY_MIN := -5
 const HAPPY_MAX := 5
-## A walk of this many roads or more is long: without shade it heats the citizen up.
-const LONG_ROUTE := 3
+## A walk of this many road squares or more is long: without shade it heats the citizen up. That is three of
+## the old full-size roads (a road you buy now is half that size).
+const LONG_ROUTE := 3 * Grid.BLOCK
+## A park cheers up the homes that are within this many squares of it (see Grid.gap): its old 3x3 area.
+const PARK_REACH := Grid.BLOCK
 ## Most green sources that count for one citizen.
 const GREEN_CAP := 2
 
@@ -37,18 +41,12 @@ const COMPLAINT_TYPES := ["Accessibility", "Walkability", "Greenery", "Pollution
 
 
 static func neighbours(i: int) -> Array[int]:
-	var out: Array[int] = []
-	var x := i % SIZE
-	var y := i / SIZE
-	if y > 0: out.append(i - SIZE)
-	if x < SIZE - 1: out.append(i + 1)
-	if y < SIZE - 1: out.append(i + SIZE)
-	if x > 0: out.append(i - 1)
-	return out
+	return Grid.neighbours(i)
 
 
+## Is square `cell` in the area of the park whose top-left square is `park`?
 static func in_park_area(park: int, cell: int) -> bool:
-	return park != cell and absi(park % SIZE - cell % SIZE) <= 1 and absi(park / SIZE - cell / SIZE) <= 1
+	return Grid.gap(park, 2, cell, 1) <= PARK_REACH and not (cell in Grid.footprint(park, 2))
 
 
 static func kind_at(cells: Array, i: int) -> int:
@@ -65,9 +63,7 @@ static func loan_penalty(loans: int) -> int:
 
 static func pollution_level(cells: Array) -> int:
 	var level := START_POLLUTION
-	for t in cells:
-		if t == null:
-			continue
+	for t in Grid.tiles(cells):
 		if t["kind"] == TileDefs.Kind.PARK:
 			level -= 3
 		elif TileDefs.is_tree_like(t):
@@ -98,46 +94,57 @@ static func shaded_roads(cells: Array) -> Array[bool]:
 	return shaded
 
 
-## Shortest road routes from a building to every service it can reach.
-## Returns { service_index: {"length": int, "shaded": bool, "path": Array[int], "kind": int} }.
+## Shortest road routes from a building to every service it can reach. `start` is the building's
+## anchor; a route starts on a road square that touches any square of the building and ends on a road
+## square that touches any square of the service. A 2:2 street is four road squares, so a road that
+## touches any side of it joins it.
+## Returns { service_anchor: {"length": int, "shaded": bool, "path": Array[int], "kind": int} }.
 ## Among equally short routes a shaded one is preferred.
-static func routes_from(cells: Array, start: int, shaded: Array[bool]) -> Dictionary:
-	var dist := {}
-	var shade_ok := {}
-	var parent := {}
+static func routes_from(cells: Array, start: int, shaded: Array[bool], service_anchors: Array = []) -> Dictionary:
+	var dist := PackedInt32Array()
+	dist.resize(Grid.CELLS)
+	var shade_ok := PackedByteArray()
+	shade_ok.resize(Grid.CELLS)
+	var parent := PackedInt32Array()
+	parent.resize(Grid.CELLS)
 	var queue: Array[int] = []
-	for n in neighbours(start):
+	for n in Grid.border(start, TileDefs.footprint(cells[start])):
 		if kind_at(cells, n) == TileDefs.Kind.ROAD:
 			dist[n] = 1
-			shade_ok[n] = shaded[n]
+			shade_ok[n] = 1 if shaded[n] else 0
 			parent[n] = -1
 			queue.append(n)
 	var head := 0
 	while head < queue.size():
 		var r := queue[head]
 		head += 1
-		for n in neighbours(r):
+		for n in Grid.neighbours(r):
 			if kind_at(cells, n) != TileDefs.Kind.ROAD:
 				continue
-			if not dist.has(n):
+			if dist[n] == 0:
 				dist[n] = dist[r] + 1
-				shade_ok[n] = shaded[n] or shade_ok[r]
+				shade_ok[n] = 1 if (shaded[n] or shade_ok[r] == 1) else 0
 				parent[n] = r
 				queue.append(n)
-			elif dist[n] == dist[r] + 1 and shade_ok[r] and not shade_ok[n]:
-				shade_ok[n] = true
+			elif dist[n] == dist[r] + 1 and shade_ok[r] == 1 and shade_ok[n] == 0:
+				shade_ok[n] = 1
 				parent[n] = r
 
 	var routes := {}
-	for m in cells.size():
-		var kind := kind_at(cells, m)
-		if kind == -1 or not TileDefs.is_service(kind) or m == start:
+	if queue.is_empty():
+		return routes
+	if service_anchors.is_empty():
+		for m in Grid.anchors(cells):
+			if TileDefs.is_service(cells[m]["kind"]):
+				service_anchors.append(m)
+	for m in service_anchors:
+		if m == start:
 			continue
 		var best := -1
-		for r in neighbours(m):
-			if not dist.has(r):
+		for r in Grid.border(m, TileDefs.footprint(cells[m])):
+			if dist[r] == 0:
 				continue
-			if best == -1 or dist[r] < dist[best] or (dist[r] == dist[best] and shade_ok[r] and not shade_ok[best]):
+			if best == -1 or dist[r] < dist[best] or (dist[r] == dist[best] and shade_ok[r] == 1 and shade_ok[best] == 0):
 				best = r
 		if best == -1:
 			continue
@@ -146,7 +153,7 @@ static func routes_from(cells: Array, start: int, shaded: Array[bool]) -> Dictio
 		while step != -1:
 			path.push_front(step)
 			step = parent[step]
-		routes[m] = {"length": dist[best], "shaded": shade_ok[best], "path": path, "kind": kind}
+		routes[m] = {"length": dist[best], "shaded": shade_ok[best] == 1, "path": path, "kind": cells[m]["kind"]}
 	return routes
 
 
@@ -176,8 +183,8 @@ static func _member(role: String, cells: Array, home: Dictionary, circumstances:
 		var nd: Dictionary = Roles.NEEDS[need_id]
 		var source := -1
 		if nd["area"]:
-			for g in cells.size():
-				if kind_at(cells, g) in nd["kinds"] and in_park_area(g, home["index"]):
+			for g in home["green_sources"]:
+				if cells[g]["kind"] in nd["kinds"]:
 					source = g
 					break
 		else:
@@ -209,13 +216,13 @@ static func _member(role: String, cells: Array, home: Dictionary, circumstances:
 			for c in home["route_cells"]:
 				if cells[c]["kind"] == TileDefs.Kind.ROAD and cells[c].get("variant", 0) == street:
 					like_source = c
-			for c in neighbours(home["index"]):
+			for c in home["border"]:
 				if kind_at(cells, c) == TileDefs.Kind.ROAD and cells[c].get("variant", 0) == street:
 					like_source = c
 
 	var dislike := false
 	if def["dislike_kind"] >= 0:
-		for c in neighbours(home["index"]):
+		for c in home["border"]:
 			if kind_at(cells, c) == def["dislike_kind"]:
 				dislike = true
 
@@ -226,6 +233,8 @@ static func _member(role: String, cells: Array, home: Dictionary, circumstances:
 	var effects := {}
 	if not circumstances.is_empty():
 		var ctx := _context(role, needs, home, cells, base)
+		ctx["like"] = like_source != -1
+		ctx["dislike"] = dislike
 		for id in circumstances:
 			if id == "population_growth":
 				continue
@@ -279,7 +288,7 @@ static func _member(role: String, cells: Array, home: Dictionary, circumstances:
 			"Accessibility":
 				detail = Roles.missing_text(unmet[0]) if not unmet.is_empty() else ("Hit by %s" % CircumstanceDefs.title(hit_card))
 			"Walkability":
-				detail = "A walk of %d roads or more with no shade" % LONG_ROUTE
+				detail = "A long walk with no shade"
 			"Greenery":
 				detail = "No park or trees nearby"
 			"Pollution":
@@ -313,7 +322,7 @@ static func _context(role: String, needs: Array, home: Dictionary, cells: Array,
 		bike = bike or v == TileDefs.STREET_BIKE
 		pedestrian = pedestrian or v == TileDefs.STREET_PEDESTRIAN
 	var parking_adjacent := false
-	for c in neighbours(home["index"]):
+	for c in home["border"]:
 		if kind_at(cells, c) == TileDefs.Kind.PARKING:
 			parking_adjacent = true
 	var member_heat := 0
@@ -330,26 +339,31 @@ static func _context(role: String, needs: Array, home: Dictionary, cells: Array,
 	}
 
 
-## Parks in the 3x3 area around home `i` and trees (or shaded streets) right next to it.
-static func _green_sources(cells: Array, i: int) -> Array[int]:
+## Parks within reach of home `i` and trees (or shaded streets) that share an edge with it, each once, as
+## the anchors of those tiles. `parks` are the anchors of all parks on the mat (worked out when left out).
+static func _green_sources(cells: Array, i: int, parks: Array = []) -> Array[int]:
 	var out: Array[int] = []
-	var x := i % SIZE
-	var y := i / SIZE
-	for dy in range(-1, 2):
-		for dx in range(-1, 2):
-			var nx := x + dx
-			var ny := y + dy
-			if (dx == 0 and dy == 0) or nx < 0 or ny < 0 or nx >= SIZE or ny >= SIZE:
-				continue
-			var j := ny * SIZE + nx
-			var t = cells[j]
-			if t == null:
-				continue
-			if t["kind"] == TileDefs.Kind.PARK:
-				out.append(j)
-			elif (dx == 0 or dy == 0) and TileDefs.is_tree_like(t):
-				out.append(j)
+	if parks.is_empty():
+		parks = _parks(cells)
+	var size := TileDefs.footprint(cells[i])
+	for p in parks:
+		if p != i and Grid.gap(i, size, p, 2) <= PARK_REACH:
+			out.append(p)
+	for c in Grid.border(i, size):
+		var t = cells[c]
+		if t != null and t["kind"] != TileDefs.Kind.PARK and TileDefs.is_tree_like(t):
+			var a := Grid.anchor_of(cells, c)
+			if not (a in out):
+				out.append(a)
 	out.sort()
+	return out
+
+
+static func _parks(cells: Array) -> Array[int]:
+	var out: Array[int] = []
+	for a in Grid.anchors(cells):
+		if cells[a]["kind"] == TileDefs.Kind.PARK:
+			out.append(a)
 	return out
 
 
@@ -372,18 +386,24 @@ static func evaluate(cells: Array, loans: int, circumstances: Array = [], card_p
 	var served_homes := {}
 	var served_student_homes := {}
 
+	var anchors := Grid.anchors(cells)
+	var parks := _parks(cells)
+	var service_anchors: Array = []
+	for a in anchors:
+		if TileDefs.is_service(cells[a]["kind"]):
+			service_anchors.append(a)
 	var homes: Array = []
 	var citizens := 0
 	var happy := 0
 	var unhappy := 0
 	var citizen_sp := 0
 	var role_happy := {}
-	for i in cells.size():
-		var kind := kind_at(cells, i)
-		if kind == -1 or not TileDefs.is_home(kind):
+	for i in anchors:
+		var kind: int = cells[i]["kind"]
+		if not TileDefs.is_home(kind):
 			continue
-		var routes := routes_from(cells, i, shaded)
-		var green_sources := _green_sources(cells, i)
+		var routes := routes_from(cells, i, shaded, service_anchors)
+		var green_sources := _green_sources(cells, i, parks)
 		var route_cells := {}
 		for m in routes:
 			for c in routes[m]["path"]:
@@ -391,6 +411,7 @@ static func evaluate(cells: Array, loans: int, circumstances: Array = [], card_p
 		var home := {
 			"index": i, "routes": routes, "green_sources": green_sources, "route_cells": route_cells.keys(),
 			"pollution": penalty, "pollution_level": pollution,
+			"border": Grid.border(i, TileDefs.footprint(cells[i])),
 		}
 		var members: Array = []
 		var sp := 0
@@ -443,8 +464,8 @@ static func evaluate(cells: Array, loans: int, circumstances: Array = [], card_p
 	var variety_bonus: int = VARIETY_BONUS[variety_roles.size()]
 
 	var unused: Array[int] = []
-	for i in cells.size():
-		if kind_at(cells, i) != -1 and TileDefs.is_service(kind_at(cells, i)) and not served.has(i):
+	for i in service_anchors:
+		if not served.has(i):
 			unused.append(i)
 	var unused_penalty := unused.size() * UNUSED_PENALTY
 	room["Accessibility"] += unused_penalty

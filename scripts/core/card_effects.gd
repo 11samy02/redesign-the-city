@@ -14,6 +14,7 @@ extends RefCounted
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const CardDefs = preload("res://scripts/core/card_defs.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
 ## About how many gold one point is worth to a bot choosing between two options.
 const POINT_VALUE := 3.0
@@ -206,19 +207,42 @@ static func stat_value(gs, i: int, stat: String) -> int:
 			return _count(p.cells, [TileDefs.Kind.ROAD])
 		"tiles":
 			var built := 0
-			for t in p.cells:
-				if t != null:
+			for t in Grid.tiles(p.cells):
+				if not t.get("fixed", false):
 					built += 1
 			return built
 		"citizens":
 			return gs.score(i)["citizens"]
 		"unhappy":
 			return gs.score(i)["unhappy_citizens"]
+		"hot":
+			# citizens with a long walk and no shade
+			return _members_where(gs.score(i), func(m): return m["heat"] > 0)
+		"unmet":
+			# citizens who cannot reach something they need
+			return _members_where(gs.score(i), _has_unmet)
 		"unused":
 			return gs.score(i)["unused"].size()
 		"score":
 			return gs.score(i)["total"]
 	return 0
+
+
+static func _has_unmet(member: Dictionary) -> bool:
+	for n in member["needs"]:
+		if not n["met"]:
+			return true
+	return false
+
+
+## How many citizens of a scored mat pass `test`.
+static func _members_where(result: Dictionary, test: Callable) -> int:
+	var n := 0
+	for a in result["apartments"]:
+		for m in a["members"]:
+			if test.call(m):
+				n += 1
+	return n
 
 
 ## The players who have the most ("max") or least ("min") of a statistic. Ties all count.
@@ -239,10 +263,19 @@ static func _extreme(gs, stat: String, mode: String) -> Array[int]:
 
 static func _count(cells: Array, kinds: Array) -> int:
 	var n := 0
-	for t in cells:
-		if t != null and t["kind"] in kinds:
+	for t in Grid.tiles(cells):
+		if t["kind"] in kinds:
 			n += 1
 	return n
+
+
+## Tiles of these kinds a penalty can take: the ones a planner built, not the ones the mat came with.
+static func _loseable(cells: Array, kinds: Array) -> Array[int]:
+	var out: Array[int] = []
+	for a in Grid.anchors(cells):
+		if cells[a]["kind"] in kinds and not cells[a].get("fixed", false):
+			out.append(a)
+	return out
 
 
 static func _cond(gs, me: int, fx: Dictionary) -> bool:
@@ -256,6 +289,12 @@ static func _cond(gs, me: int, fx: Dictionary) -> bool:
 				if a["routes"].is_empty():
 					return false
 			return true
+		"no_hot":
+			return gs.score(me)["citizens"] > 0 and stat_value(gs, me, "hot") == 0
+		"all_met":
+			return gs.score(me)["citizens"] > 0 and stat_value(gs, me, "unmet") == 0
+		"no_unhappy":
+			return gs.score(me)["citizens"] > 0 and gs.score(me)["unhappy_citizens"] == 0
 		"no_loans":
 			return p.loans == 0
 		"has_loans":
@@ -346,21 +385,18 @@ static func _transfer(gs, n: int, lines: Array[String]) -> void:
 ## lets players pick) chooses them instead, unless every tile of that kind has to go anyway.
 static func _lose(gs, me: int, kinds: Array, n: int, lines: Array[String]) -> void:
 	var p = gs.players[me]
-	if gs.players_pick_losses and not p.is_bot() and _count(p.cells, kinds) > n:
+	if gs.players_pick_losses and not p.is_bot() and _loseable(p.cells, kinds).size() > n:
 		gs.pending_losses.append({"kinds": kinds, "n": n})
 		lines.append("%s chooses %s to lose." % [p.name, _a(kinds_name(kinds), n)])
 		return
 	var lost := 0
 	for k in n:
-		var spots: Array[int] = []
-		for c in p.cells.size():
-			if p.cells[c] != null and p.cells[c]["kind"] in kinds:
-				spots.append(c)
+		var spots := _loseable(p.cells, kinds)
 		if spots.is_empty():
 			break
 		var at: int = spots[gs.card_rng.randi() % spots.size()]
 		lines.append("%s loses %s." % [p.name, _a(TileDefs.display_name(p.cells[at]).to_lower(), 1)])
-		p.cells[at] = null
+		Grid.remove(p.cells, at)
 		lost += 1
 	if lost == 0:
 		lines.append("%s has nothing of that kind to lose." % p.name)

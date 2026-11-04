@@ -10,6 +10,7 @@ const Widgets = preload("res://scripts/ui/widgets.gd")
 const Describe = preload("res://scripts/ui/describe.gd")
 const TileView = preload("res://scripts/ui/tile_view.gd")
 const MatView = preload("res://scripts/ui/mat_view.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 const ShopView = preload("res://scripts/ui/shop_view.gd")
 const Tooltip = preload("res://scripts/ui/tooltip.gd")
 const RulesPanel = preload("res://scripts/ui/rules_panel.gd")
@@ -37,8 +38,11 @@ const FastForward = preload("res://scripts/game/overlays/fast_forward.gd")
 const CardEffects = preload("res://scripts/core/card_effects.gd")
 const CardDefs = preload("res://scripts/core/card_defs.gd")
 
-const MAT_CELL := 70.0
-const MAT_GAP := 5
+## One square of the 14x14 mat. A 2:2 tile is two squares wide, about the size a whole tile was on the old 7x7 mat.
+const MAT_CELL := 46.0
+const MAT_GAP := 2
+## Width of the right-hand column: the player card and the turn order.
+const RIGHT_W := 268.0
 const ARROW_KEYS := {KEY_LEFT: Vector2i(-1, 0), KEY_A: Vector2i(-1, 0), KEY_RIGHT: Vector2i(1, 0), KEY_D: Vector2i(1, 0),
 	KEY_UP: Vector2i(0, -1), KEY_W: Vector2i(0, -1), KEY_DOWN: Vector2i(0, 1), KEY_S: Vector2i(0, 1)}
 
@@ -84,6 +88,11 @@ var _action_bar: ActionBar
 var _toast: Toast
 var _preview_label: Label
 var _bot: BotDriver
+## The tile in the planner's hand, drawn on the effects layer so it follows the cursor. It trails the cursor a little
+## and bobs while it is held, and flies onto the mat when it is placed (see _take_from_hand).
+var _held: TextureRect
+var _held_pos := Vector2.ZERO
+var _held_t := 0.0
 var _fast_forward: FastForward
 
 
@@ -116,7 +125,7 @@ func _build() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right"]:
 		margin.add_theme_constant_override("margin_" + side, 24)
-	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_top", 0)
 	margin.add_theme_constant_override("margin_bottom", 0)
 	add_child(margin)
 	var col := VBoxContainer.new()
@@ -128,7 +137,14 @@ func _build() -> void:
 	_top_bar.sound_pressed.connect(_toggle_sound)
 	_top_bar.menu_pressed.connect(_open_pause)
 	_top_bar.circumstance_pressed.connect(_open_circumstance_review)
-	col.add_child(_top_bar)
+	# the header is a panel like the footer, flush with the top the way the footer is with the bottom
+	var header := PanelContainer.new()
+	var hb := UiKit.box(UiKit.PANEL, 20, 0, Color.TRANSPARENT, 12)
+	hb.corner_radius_top_left = 0
+	hb.corner_radius_top_right = 0
+	header.add_theme_stylebox_override("panel", hb)
+	header.add_child(_top_bar)
+	col.add_child(header)
 	col.add_child(_build_main_row())
 	_action_bar = ActionBar.new(gs, tooltip)
 	_action_bar.free_road_pressed.connect(_on_free_road)
@@ -142,8 +158,7 @@ func _build() -> void:
 ## Shop on the left, the active mat in the middle, turn order on the right.
 func _build_main_row() -> Control:
 	var main := HBoxContainer.new()
-	main.alignment = BoxContainer.ALIGNMENT_CENTER
-	main.add_theme_constant_override("separation", 28)
+	main.add_theme_constant_override("separation", 20)
 	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_shop_panel = ShopPanel.new(gs.shop)
 	shop_view = _shop_panel.view
@@ -153,16 +168,34 @@ func _build_main_row() -> Control:
 	_shop_panel.slot_hovered.connect(_on_slot_hovered)
 	main.add_child(_build_left_column())
 	main.add_child(_build_center_column())
+	# right column: whose city this is, then the order the planners play in
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 8)
+	right.size_flags_horizontal = Control.SIZE_SHRINK_END
+	right.custom_minimum_size.x = RIGHT_W
+	banner = PlayerBanner.new(tooltip)
+	right.add_child(banner)
 	_order_panel = TurnOrderPanel.new(gs)
 	_order_panel.city_pressed.connect(_on_city_pressed)
-	main.add_child(_order_panel)
+	# the order sits in a box that runs down to the bottom edge of the mat
+	var order_box := PanelContainer.new()
+	order_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	order_box.add_theme_stylebox_override("panel", UiKit.box(Color("#0C2433"), 20, 2, UiKit.LINE, 10))
+	order_box.add_child(_order_panel)
+	right.add_child(order_box)
+	main.add_child(right)
+	# all three columns are as tall as the mat and centred together, so their top and bottom edges line up
+	var column_h: float = mat_view.custom_minimum_size.y
+	for col in [main.get_child(0), right]:
+		col.custom_minimum_size.y = column_h
+		col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return main
 
 
 ## The construction site with the two turn decks under it.
 func _build_left_column() -> Control:
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 14)
+	v.add_theme_constant_override("separation", 12)
 	v.add_child(_shop_panel)
 	var decks := HBoxContainer.new()
 	decks.add_theme_constant_override("separation", 12)
@@ -171,6 +204,8 @@ func _build_left_column() -> Control:
 	piles.custom_minimum_size.x = 200
 	_deck_event = DeckPanel.new(CardDefs.EVENT, tooltip, true)
 	_deck_penalty = DeckPanel.new(CardDefs.PENALTY, tooltip, true)
+	_deck_event.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_deck_penalty.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	piles.add_child(_deck_event)
 	piles.add_child(_deck_penalty)
 	decks.add_child(piles)
@@ -178,6 +213,9 @@ func _build_left_column() -> Control:
 	_last_card.pressed.connect(_open_card_view)
 	decks.add_child(_last_card)
 	decks.custom_minimum_size.x = _shop_panel.view.custom_minimum_size.x
+	# the decks take what is left under the construction site, so the column ends where the mat does
+	decks.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	piles.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(decks)
 	return v
 
@@ -185,17 +223,18 @@ func _build_left_column() -> Control:
 func _build_center_column() -> Control:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 8)
-	banner = PlayerBanner.new(tooltip)
-	v.add_child(banner)
 	mat_view = MatView.new()
 	mat_view.setup(MAT_CELL, MAT_GAP, TileView.Mode.MAT)
 	mat_view.cell_pressed.connect(_on_cell_pressed)
 	mat_view.cell_right_pressed.connect(func(_i): _cancel_hand())
 	mat_view.cell_hovered.connect(_on_cell_hovered)
 	mat_view.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	mat_view.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	v.add_child(mat_view)
-	v.custom_minimum_size.x = mat_view.custom_minimum_size.x
-	v.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	# the mat takes all the room the two side columns leave, and sits in the middle of it
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	return v
 
 
@@ -210,6 +249,12 @@ func _build_layers() -> void:
 	tip_layer.add_child(tooltip)
 	_toast = Toast.new()
 	fx.add_child(_toast)
+	_held = TextureRect.new()
+	_held.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_held.stretch_mode = TextureRect.STRETCH_SCALE
+	_held.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_held.visible = false
+	fx.add_child(_held)
 	_preview_label = UiKit.outline(UiKit.label("", 26, UiKit.OLIVE, "display_bold"), 8)
 	_preview_label.visible = false
 	fx.add_child(_preview_label)
@@ -244,15 +289,27 @@ func refresh_all() -> void:
 	_deck_penalty.set_count(gs.card_deck_count(CardDefs.PENALTY))
 	shop_view.set_selected(hand.get("slot", -1) if hand.get("type", "") == "shop" else -1)
 	mat_view.refresh(p.cells, result)
-	mat_view.set_targets(not hand.is_empty())
+	mat_view.set_targets(not hand.is_empty(), _hand_size())
+	kb.cells = p.cells
 	_top_bar.set_round(gs.round_number, GameState.ROUNDS)
 	_top_bar.set_circumstances(gs.revealed, gs.round_number)
 	banner.show_player(p, result)
 	_order_panel.refresh()
-	_last_card.show_card(gs.turn_card)
+	_last_card.show_cards(_drawn_cards())
 	_apply_hover_rules()
 	_action_bar.show_bought(turn_bought)
 	_update_actions()
+
+
+## The turn cards the current planner has drawn so far, oldest first. A card still being played is last.
+## "now" marks the one drawn this turn.
+func _drawn_cards() -> Array:
+	var out: Array = []
+	for e in gs.cards_drawn_by(gs.current_index()):
+		out.append({"id": e["id"], "round": e["round"], "now": e["round"] == gs.round_number})
+	if gs.has_pending_card():
+		out.append({"id": gs.turn_card["id"], "round": gs.round_number, "now": true})
+	return out
 
 
 func _update_actions() -> void:
@@ -261,11 +318,15 @@ func _update_actions() -> void:
 
 ## Small entrance once a planner takes the controls.
 func turn_intro() -> void:
-	for k in mat_view.views.size():
-		var v = mat_view.views[k]
+	# only the tiles that are on the mat, one after the other (the empty squares stay still)
+	var k := 0
+	for v in mat_view.views:
+		if v.tile == null or not v.visible:
+			continue
 		var tw := create_tween()
-		tw.tween_interval(k * 0.02)
+		tw.tween_interval(k * 0.025)
 		tw.tween_callback(func(): v.pop(0.06))
+		k += 1
 
 
 func show_toast(text: String) -> void:
@@ -289,17 +350,89 @@ func _hand_tile():
 	return null
 
 
+## Squares along one side of the tile in the planner's hand: 1 or 2 (1 with an empty hand).
+func _hand_size() -> int:
+	var t = _hand_tile()
+	return TileDefs.footprint(t) if t != null else 1
+
+
+## Shows the picked-up tile on the cursor, or hides it when the hand is empty or a computer is playing.
+func _refresh_held() -> void:
+	var t = _hand_tile()
+	if t == null or bot_active:
+		_held.visible = false
+		return
+	var n := TileDefs.footprint(t)
+	var side: float = mat_view.span(n)
+	var was_visible := _held.visible
+	_held.texture = UiKit.tex(TileDefs.art_path(t))
+	_held.size = Vector2(side, side)
+	_held.pivot_offset = _held.size / 2.0
+	_held.visible = true
+	if not was_visible:
+		_held_pos = _held_goal()["center"]
+		_held.scale = Vector2.ONE * 0.6
+		create_tween().tween_property(_held, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+## Where the held tile wants to be: beside the cursor (so the squares it will cover stay visible), or on the lot
+## the keyboard cursor is on.
+func _held_goal() -> Dictionary:
+	var t = _hand_tile()
+	var n := TileDefs.footprint(t) if t != null else 1
+	var cells: Array = gs.current_player().cells
+	var point := -1
+	if kb.on and kb.area == "mat":
+		point = kb.mat
+	elif not kb.on and hover_cell >= 0:
+		point = hover_cell
+	var at := -1
+	if point >= 0:
+		at = Grid.find_anchor(cells, point, n)
+		if at < 0 and cells[point] != null and hand.get("type", "") == "shop":
+			var old := Grid.anchor_of(cells, point)
+			if gs.can_replace(hand["slot"], old):
+				at = old
+	if at >= 0:
+		var r: Rect2 = mat_view.footprint_global_rect(at, n)
+		return {"center": r.get_center(), "side": r.size.x, "snapped": true}
+	var side: float = mat_view.span(n)
+	if kb.on and kb.area == "shop":
+		return {"center": shop_view.views[kb.shop].get_global_rect().get_center(), "side": side, "snapped": false}
+	return {"center": get_viewport().get_mouse_position() + Vector2(side, side) * -0.15, "side": side, "snapped": false}
+
+
+func _process(delta: float) -> void:
+	if _held == null or not _held.visible:
+		return
+	_held_t += delta
+	var goal := _held_goal()
+	var target: Vector2 = goal["center"]
+	_held_pos = _held_pos.lerp(target, 1.0 - exp(-delta * 20.0))
+	var lag := _held_pos - target
+	var side := lerpf(_held.size.x, goal["side"], 1.0 - exp(-delta * 16.0))
+	_held.size = Vector2(side, side)
+	_held.pivot_offset = _held.size / 2.0
+	# over the squares it will take it hovers a little and breathes; elsewhere it trails the cursor and tilts
+	var lift: float = -5.0 + sin(_held_t * 5.0) * 2.0 if goal["snapped"] else sin(_held_t * 5.0) * 2.5
+	_held.position = _held_pos - _held.size / 2.0 + Vector2(0, lift)
+	var tilt: float = 0.0 if goal["snapped"] else clampf(-lag.x * 0.006, -0.3, 0.3) + sin(_held_t * 3.0) * 0.03
+	_held.rotation = lerpf(_held.rotation, tilt, 1.0 - exp(-delta * 12.0))
+
+
 func set_hand(h: Dictionary) -> void:
 	hand = h
 	shop_view.set_selected(h.get("slot", -1) if h.get("type", "") == "shop" else -1)
-	mat_view.set_targets(not h.is_empty())
+	mat_view.set_targets(not h.is_empty(), _hand_size())
+	_refresh_held()
 	if h.is_empty():
 		mat_view.set_ghost(null, -1)
 		_preview_label.visible = false
 	elif kb.on:
 		kb.area = "mat"
 		if gs.current_player().cells[kb.mat] != null:
-			kb.mat = gs.current_player().cells.find(null)
+			var spots := Grid.valid_anchors(gs.current_player().cells, _hand_size())
+			kb.mat = spots[0] if not spots.is_empty() else gs.current_player().cells.find(null)
 		_update_kb_focus()
 	if hover_cell >= 0:
 		focus_cell(hover_cell)
@@ -338,25 +471,27 @@ func _on_cell_hovered(i: int, inside: bool) -> void:
 
 
 ## Shows what a lot holds, or what building the picked-up tile there would do.
-func focus_cell(i: int) -> void:
+func focus_cell(square: int) -> void:
 	var cells: Array = gs.current_player().cells
+	# a tile is known by its top-left square, whichever of its squares was pointed at
+	var i := Grid.anchor_of(cells, square)
 	if not gs.pending_losses.is_empty():
 		# choosing what to lose: the glowing lots stay lit, hovering only names the tile
-		if cells[i] != null:
+		if i >= 0:
 			tooltip.show_tile(cells[i], mat_view.cell_global_rect(i), Describe.cell_lines(cells, result, i), false, MatView.road_mask(cells, i))
 		else:
 			tooltip.hide_tip()
 		return
 	var t = _hand_tile()
-	if t != null and cells[i] == null:
-		_preview_build(t, cells, i)
+	if t != null and i < 0:
+		_preview_build(t, cells, square)
 		return
 	if t != null and hand["type"] == "shop" and gs.can_replace(hand["slot"], i):
 		_preview_build(t, cells, i, true)
 		return
 	mat_view.set_ghost(null, -1)
 	_preview_label.visible = false
-	if cells[i] == null:
+	if i < 0:
 		mat_view.clear_highlights()
 		tooltip.hide_tip()
 		return
@@ -364,19 +499,35 @@ func focus_cell(i: int) -> void:
 	tooltip.show_tile(cells[i], mat_view.cell_global_rect(i), Describe.cell_lines(cells, result, i), false, MatView.road_mask(cells, i))
 
 
-## Ghost tile, floating point change and tooltip for building `t` on empty lot `i`.
-func _preview_build(t: Dictionary, cells: Array, i: int, replacing := false) -> void:
-	var rect := mat_view.cell_global_rect(i)
-	var preview := _with(cells, i, t)
+## Ghost tile, floating point change and tooltip for building `t` where the planner points: on the empty
+## square `i`, or (when `replacing`) over the tile whose top-left square is `i`.
+func _preview_build(t: Dictionary, cells: Array, square: int, replacing := false) -> void:
+	var size := TileDefs.footprint(t)
+	var i := square if replacing else Grid.find_anchor(cells, square, size)
+	if i < 0:
+		# no room for the footprint here: show a red outline and say so
+		var at := Grid.ghost_anchor(square, size)
+		mat_view.clear_highlights()
+		mat_view.set_ghost(t, at, false)
+		var no_room := mat_view.footprint_global_rect(at, size)
+		_preview_label.text = "No room"
+		_preview_label.add_theme_color_override("font_color", UiKit.HEAT)
+		_preview_label.visible = true
+		_preview_label.reset_size()
+		_preview_label.position = Vector2(no_room.get_center().x - _preview_label.size.x / 2, no_room.position.y - _preview_label.size.y - 2)
+		tooltip.hide_tip()
+		return
+	var rect := mat_view.footprint_global_rect(i, size)
+	var preview := _with(cells, i, t, replacing)
 	var pr := Scoring.evaluate(preview, gs.current_player().loans, gs.revealed, gs.current_player().card_points)
-	mat_view.set_ghost(t, i)
+	mat_view.set_ghost(t, i, true, TileDefs.footprint(cells[i]) if replacing else 0)
 	Influence.show_for(mat_view, preview, pr, i)
 	var delta: int = pr["total"] - result["total"]
 	_preview_label.text = Describe.points(delta) if delta != 0 else "No change"
 	_preview_label.add_theme_color_override("font_color", UiKit.OLIVE if delta > 0 else (UiKit.HEAT if delta < 0 else UiKit.LIMESTONE))
 	_preview_label.visible = true
 	_preview_label.reset_size()
-	_preview_label.position = Vector2(rect.get_center().x - _preview_label.size.x / 2, rect.position.y - _preview_label.size.y - 2)
+	_preview_label.position = Vector2(rect.get_center().x - _preview_label.size.x / 2, maxf(rect.position.y - _preview_label.size.y - 2, 60.0))
 	var lines: Array[String] = ["[b]If you %s: %s[/b]" % ["replace this tile" if replacing else "build here", _preview_label.text]]
 	lines.append_array(Describe.cell_lines(preview, pr, i))
 	tooltip.show_tile(t, rect, lines, hand.get("type", "") == "shop", MatView.road_mask(preview, i))
@@ -392,9 +543,12 @@ func unfocus_cell() -> void:
 		_show_loss_targets()
 
 
-static func _with(cells: Array, i: int, tile: Dictionary) -> Array:
+## A copy of the mat with `tile` built on top-left square `i`; `replacing` takes the tile that stands there away first.
+static func _with(cells: Array, i: int, tile: Dictionary, replacing := false) -> Array:
 	var c := cells.duplicate()
-	c[i] = tile
+	if replacing:
+		Grid.remove(c, i)
+	Grid.place(c, i, tile)
 	return c
 
 
@@ -454,26 +608,36 @@ func _reject(view, msg: String) -> void:
 	show_toast(msg)
 
 
-func _on_cell_pressed(i: int) -> void:
+func _on_cell_pressed(square: int) -> void:
+	var cells: Array = gs.current_player().cells
+	var i := Grid.anchor_of(cells, square)
 	if not gs.pending_losses.is_empty():
-		_on_loss_picked(i)
+		_on_loss_picked(i if i >= 0 else square)
 		return
 	if _locked():
 		return
-	var cells: Array = gs.current_player().cells
 	if hand.is_empty():
-		if cells[i] == null and gs.can_buy():
+		if i < 0 and gs.can_buy():
 			show_toast("Pick a tile from the construction site first.")
 		return
-	if cells[i] != null:
+	if i >= 0:
 		if hand["type"] == "shop" and gs.can_replace(hand["slot"], i):
 			_replace(i)
 		elif hand["type"] == "shop" and gs.current_player().replaced:
 			_reject(mat_view.views[i], "You already replaced a tile. Choose an empty lot.")
+		elif cells[i].get("fixed", false):
+			_reject(mat_view.views[i], "That tile came with the mat and cannot be replaced.")
+		elif hand["type"] == "shop":
+			_reject(mat_view.views[i], "That lot is taken. Choose an empty one, or one the new tile fits on.")
 		else:
 			_reject(mat_view.views[i], "That lot is taken. Choose an empty one.")
 		return
-	commit(i)
+	var size := _hand_size()
+	var anchor := Grid.find_anchor(cells, square, size)
+	if anchor < 0:
+		_reject(mat_view.views[square], "No room for a %s tile there. It needs %d x %d free squares." % [TileDefs.size_label(_hand_tile()), size, size])
+		return
+	commit(anchor)
 
 
 ## Asks, then swaps the picked-up shop tile for the one on lot `cell`. The old tile goes back to the
@@ -493,12 +657,12 @@ func _replace(cell: int) -> void:
 	var before: int = result["total"]
 	var before_poll: int = result["pollution"]
 	var from_rect := _take_from_hand(h)
-	var to_rect := mat_view.cell_global_rect(cell)
+	var to_rect := mat_view.footprint_global_rect(cell, TileDefs.footprint(tile))
 	var cost := gs.price_of(tile)
 	TileFx.fly_coins(fx, banner.coin_center(), from_rect.get_center(), cost)
 	banner.animate_money(gs.current_player().money - cost)
 	Sfx.play("whoosh")
-	await TileFx.fly_tile(fx, TileDefs.art_path(tile, MatView.road_mask(_with(gs.current_player().cells, cell, tile), cell)), from_rect, to_rect)
+	await TileFx.fly_tile(fx, TileDefs.art_path(tile, MatView.road_mask(_with(gs.current_player().cells, cell, tile, true), cell)), from_rect, to_rect)
 	var removed := gs.replace_tile(h["slot"], cell)
 	assert(not removed.is_empty(), "replacement rejected after validation")
 	turn_bought.append(tile)
@@ -542,7 +706,7 @@ func commit(cell: int) -> void:
 	var before: int = result["total"]
 	var before_poll: int = result["pollution"]
 	var from_rect := _take_from_hand(h)
-	var to_rect := mat_view.cell_global_rect(cell)
+	var to_rect := mat_view.footprint_global_rect(cell, TileDefs.footprint(tile))
 	if h["type"] == "shop":
 		var cost := gs.price_of(tile)
 		TileFx.fly_coins(fx, banner.coin_center(), from_rect.get_center(), cost)
@@ -576,6 +740,9 @@ func commit(cell: int) -> void:
 ## Empties the hand and returns the screen rect the tile flies out of.
 func _take_from_hand(h: Dictionary) -> Rect2:
 	var from_rect: Rect2
+	var held_rect := Rect2(_held.position, _held.size)
+	var was_held := _held.visible
+	_held.visible = false
 	if h["type"] == "shop":
 		var v = shop_view.views[h["slot"]]
 		from_rect = v.get_global_rect()
@@ -584,6 +751,8 @@ func _take_from_hand(h: Dictionary) -> Rect2:
 	else:
 		var br := _action_bar.bonus_button_rect() if h["type"] == "bonus" else _action_bar.road_button_rect()
 		from_rect = Rect2(br.get_center() - Vector2(40, 40), Vector2(80, 80))
+	if was_held:
+		from_rect = held_rect
 	hand = {}
 	mat_view.set_ghost(null, -1)
 	mat_view.set_targets(false)
@@ -595,11 +764,14 @@ func _take_from_hand(h: Dictionary) -> Rect2:
 
 ## The new tile and any roads it touches bounce a little.
 func _pop_placed(cell: int) -> void:
+	var cells: Array = gs.current_player().cells
 	mat_view.views[cell].pop(0.16)
-	for n in Scoring.neighbours(cell):
-		var nt = gs.current_player().cells[n]
-		if nt != null and nt["kind"] == TileDefs.Kind.ROAD:
-			mat_view.views[n].pop(0.05)
+	var seen := {}
+	for n in Grid.border(cell, TileDefs.footprint(cells[cell])):
+		var a := Grid.anchor_of(cells, n)
+		if a >= 0 and not seen.has(a) and cells[a]["kind"] == TileDefs.Kind.ROAD:
+			seen[a] = true
+			mat_view.views[a].pop(0.05)
 
 
 func _on_loan() -> void:
@@ -944,7 +1116,7 @@ func _open_pause() -> void:
 				leaving = true
 				Game.goto(Game.TITLE_SCENE)
 		"quit":
-			if await _ask("Quit Egkomi City?", "The current game will be lost.", [["Stay", "primary", false], ["Quit", "secondary", true]], "", 0):
+			if await _ask("Quit Redesign the City?", "The current game will be lost.", [["Stay", "primary", false], ["Quit", "secondary", true]], "", 0):
 				get_tree().quit()
 
 

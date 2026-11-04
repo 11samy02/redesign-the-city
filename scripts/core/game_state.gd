@@ -7,13 +7,14 @@ const Scoring = preload("res://scripts/core/scoring.gd")
 const CircumstanceDefs = preload("res://scripts/core/circumstance_defs.gd")
 const CardDefs = preload("res://scripts/core/card_defs.gd")
 const CardEffects = preload("res://scripts/core/card_effects.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
 const ROUNDS := 8
 const BUYS_PER_TURN := 4
 const START_MONEY := 100
 const FREE_ROADS := 4
 const LOAN_AMOUNT := 20
-const MAT_CELLS := 49
+const MAT_CELLS := Grid.CELLS
 const MAX_PLAYERS := 4
 const REMOVED_PER_MISSING_PLAYER := 55
 
@@ -39,6 +40,8 @@ class PlayerData:
 
 
 var players: Array[PlayerData] = []
+## The prefixed mat everyone started on, or null for empty mats.
+var mat_preset = null
 ## The construction site: one stack per kind of tile, as {"tile": Dictionary, "count": int,
 ## "start": int}. A bought-out stack stays in the list with count 0.
 var shop: Array = []
@@ -75,25 +78,33 @@ var card_log: Array[Dictionary] = []
 ## When true, a human planner chooses which tiles a penalty takes (see lose_tile_at); otherwise they
 ## are picked at random. Bots always lose random tiles.
 var players_pick_losses := false
+## What each planner's city looked like when every round ended: city_history[seat][round - 1] =
+## {"cells", "loans", "card_points", "money"}. Round 0, the empty mat, is not stored.
+var city_history: Array = []
 ## Tiles the current planner still has to choose to lose: [{"kinds": Array, "n": int}].
 var pending_losses: Array = []
 
 
-func setup(names: Array, color_indices: Array, seed_value := -1, bot_levels: Array = []) -> void:
+## `mat` is a PlayerMatPreset (see mat_library.gd): every planner starts with its tiles already built,
+## and those tiles can never be replaced or lost. Without one the mats start empty.
+func setup(names: Array, color_indices: Array, seed_value := -1, bot_levels: Array = [], mat = null) -> void:
 	if seed_value >= 0:
 		rng.seed = seed_value
 	else:
 		rng.randomize()
 	players.clear()
+	city_history = []
 	for i in names.size():
+		city_history.append([])
 		var p := PlayerData.new()
 		p.name = names[i]
 		p.color_index = color_indices[i]
 		p.money = START_MONEY
 		p.free_roads = FREE_ROADS
 		p.bot_level = bot_levels[i] if i < bot_levels.size() else 0
-		p.cells.resize(MAT_CELLS)
+		p.cells = mat.build_cells() if mat != null else Grid.empty()
 		players.append(p)
+	mat_preset = mat
 
 	_stock_shop(MAX_PLAYERS - names.size())
 	_plan_circumstances(seed_value)
@@ -299,8 +310,9 @@ func next_loan_penalty() -> int:
 	return Scoring.loan_penalty(loans + 1) - Scoring.loan_penalty(loans)
 
 
-func can_place(cell: int) -> bool:
-	return cell >= 0 and cell < MAT_CELLS and current_player().cells[cell] == null
+## Can a tile covering `size` x `size` squares go with its top-left square on `cell`?
+func can_place(cell: int, size := 1) -> bool:
+	return Grid.fits(current_player().cells, cell, size)
 
 
 func can_buy() -> bool:
@@ -308,27 +320,35 @@ func can_buy() -> bool:
 
 
 func buy_and_place(slot: int, cell: int) -> bool:
-	if not can_buy() or not can_afford(slot) or not can_place(cell):
+	if not can_buy() or not can_afford(slot) or not can_place(cell, TileDefs.footprint(shop[slot]["tile"])):
 		return false
 	var tile: Dictionary = shop[slot]["tile"].duplicate()
 	current_player().money -= price_of(tile)
-	current_player().cells[cell] = tile
+	Grid.place(current_player().cells, cell, tile)
 	shop[slot]["count"] -= 1
 	purchases += 1
 	return true
 
 
-## Whether the picked shop tile may take the place of the tile on `cell`: once per planner and game,
-## it must be bought like any tile (so it needs a buy and the gold), and only a tile that came out of
-## the shop can go back into it (free roads and event gifts cannot).
+## Whether the picked shop tile may take the place of the tile on `cell` (any of its squares): once per
+## planner and game, it must be bought like any tile (so it needs a buy and the gold), and only a tile that
+## came out of the shop can go back into it (free roads, event gifts and prefixed tiles cannot). The new
+## tile must fit where the old one stood: its top-left square goes on the old tile's top-left square.
 func can_replace(slot: int, cell: int) -> bool:
 	var p := current_player()
 	if p.replaced or not can_buy() or not can_afford(slot) or cell < 0 or cell >= MAT_CELLS:
 		return false
-	var old = p.cells[cell]
-	if old == null or old.get("free", false):
+	var anchor := Grid.anchor_of(p.cells, cell)
+	if anchor < 0:
 		return false
-	return TileDefs.sort_key(old) != TileDefs.sort_key(shop[slot]["tile"]) and _stack_of(old) >= 0
+	var old: Dictionary = p.cells[anchor]
+	if old.get("free", false) or old.get("fixed", false):
+		return false
+	if TileDefs.sort_key(old) == TileDefs.sort_key(shop[slot]["tile"]) or _stack_of(old) < 0:
+		return false
+	var trial := p.cells.duplicate()
+	Grid.remove(trial, anchor)
+	return Grid.fits(trial, anchor, TileDefs.footprint(shop[slot]["tile"]))
 
 
 ## Buys the shop tile onto an occupied lot; the tile that stood there goes back into the construction
@@ -337,10 +357,12 @@ func replace_tile(slot: int, cell: int) -> Dictionary:
 	if not can_replace(slot, cell):
 		return {}
 	var p := current_player()
-	var old: Dictionary = p.cells[cell]
+	var anchor := Grid.anchor_of(p.cells, cell)
+	var old: Dictionary = p.cells[anchor]
 	var tile: Dictionary = shop[slot]["tile"].duplicate()
 	p.money -= price_of(tile)
-	p.cells[cell] = tile
+	Grid.remove(p.cells, anchor)
+	Grid.place(p.cells, anchor, tile)
 	shop[slot]["count"] -= 1
 	shop[_stack_of(old)]["count"] += 1
 	p.replaced = true
@@ -361,27 +383,29 @@ func pending_loss() -> Dictionary:
 	return pending_losses[0] if not pending_losses.is_empty() else {}
 
 
-## The lots the current planner may pick for the loss they are choosing.
+## The tiles (their top-left squares) the current planner may pick for the loss they are choosing.
+## Prefixed tiles can never be lost.
 func loss_cells() -> Array[int]:
 	var out: Array[int] = []
 	var loss := pending_loss()
 	if loss.is_empty():
 		return out
 	var cells: Array = current_player().cells
-	for c in cells.size():
-		if cells[c] != null and cells[c]["kind"] in loss["kinds"]:
+	for c in Grid.anchors(cells):
+		if cells[c]["kind"] in loss["kinds"] and not cells[c].get("fixed", false):
 			out.append(c)
 	return out
 
 
-## The planner gives up the tile on `cell` for the loss they are choosing. Returns that tile,
-## or {} when the lot is not a valid pick.
+## The planner gives up the tile on `cell` (any square of it) for the loss they are choosing. Returns that
+## tile, or {} when the lot is not a valid pick.
 func lose_tile_at(cell: int) -> Dictionary:
-	if not loss_cells().has(cell):
+	var anchor := Grid.anchor_of(current_player().cells, cell)
+	if anchor < 0 or not loss_cells().has(anchor):
 		return {}
 	var p := current_player()
-	var lost: Dictionary = p.cells[cell]
-	p.cells[cell] = null
+	var lost: Dictionary = p.cells[anchor]
+	Grid.remove(p.cells, anchor)
 	pending_losses[0]["n"] -= 1
 	if pending_losses[0]["n"] <= 0 or loss_cells().is_empty():
 		pending_losses.pop_front()
@@ -393,7 +417,7 @@ func place_free_road(cell: int) -> bool:
 		return false
 	var road := TileDefs.make(TileDefs.Kind.ROAD)
 	road["free"] = true
-	current_player().cells[cell] = road
+	Grid.place(current_player().cells, cell, road)
 	current_player().free_roads -= 1
 	return true
 
@@ -401,11 +425,11 @@ func place_free_road(cell: int) -> bool:
 ## Places the `index`-th free tile an event card gave the current player. Costs nothing and is not a purchase.
 func place_bonus_tile(index: int, cell: int) -> bool:
 	var p := current_player()
-	if game_over or index < 0 or index >= p.bonus_tiles.size() or not can_place(cell):
+	if game_over or index < 0 or index >= p.bonus_tiles.size() or not can_place(cell, TileDefs.footprint(p.bonus_tiles[index])):
 		return false
 	var tile: Dictionary = p.bonus_tiles[index]
 	tile["free"] = true
-	p.cells[cell] = tile
+	Grid.place(p.cells, cell, tile)
 	p.bonus_tiles.remove_at(index)
 	return true
 
@@ -424,12 +448,20 @@ func end_turn() -> String:
 	if turn < players.size():
 		return "turn"
 	turn = 0
+	_record_round()
 	if round_number >= ROUNDS:
 		game_over = true
 		return "game_over"
 	round_number += 1
 	_plan_order()
 	return "round"
+
+
+## Keeps a copy of every city as the round ends, so the end screen can replay how they grew.
+func _record_round() -> void:
+	for i in players.size():
+		var p := players[i]
+		city_history[i].append({"cells": p.cells.duplicate(true), "loans": p.loans, "card_points": p.card_points, "money": p.money})
 
 
 func is_game_over() -> bool:

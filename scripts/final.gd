@@ -11,6 +11,7 @@ const ScoreboardOverlay = preload("res://scripts/final/scoreboard_overlay.gd")
 const ReflectionOverlay = preload("res://scripts/final/reflection_overlay.gd")
 const DemoGame = preload("res://scripts/final/demo_game.gd")
 const CardHistoryOverlay = preload("res://scripts/final/card_history_overlay.gd")
+const CityTimelineOverlay = preload("res://scripts/final/city_timeline_overlay.gd")
 
 var gs: GameState
 ## One scoring result per player, in seat order.
@@ -79,11 +80,11 @@ func _build() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for s in ["left", "right"]:
 		margin.add_theme_constant_override("margin_" + s, 30)
-	margin.add_theme_constant_override("margin_top", 24)
-	margin.add_theme_constant_override("margin_bottom", 24)
+	margin.add_theme_constant_override("margin_top", 22)
+	margin.add_theme_constant_override("margin_bottom", 34)
 	add_child(margin)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 18)
+	v.add_theme_constant_override("separation", 14)
 	margin.add_child(v)
 	v.add_child(_build_head())
 	v.add_child(_build_columns())
@@ -114,7 +115,7 @@ func _build_head() -> Control:
 	var head := HBoxContainer.new()
 	var titles := VBoxContainer.new()
 	titles.add_theme_constant_override("separation", -4)
-	titles.add_child(UiKit.label("Final scoring", 48, UiKit.LIMESTONE, "display_bold"))
+	titles.add_child(UiKit.label("Final scoring", 40, UiKit.LIMESTONE, "display_bold"))
 	titles.add_child(UiKit.label("Every citizen scores their happiness. Every loan costs points, and each one costs more than the last.", 18, UiKit.MUTED))
 	head.add_child(titles)
 	head.add_child(UiKit.spacer())
@@ -131,10 +132,14 @@ func _build_columns() -> Control:
 	row.add_theme_constant_override("separation", 18)
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var n := gs.players.size()
-	var cell := 38.0  # the same for every player count: the footer buttons must stay on screen
+	var cell := 17.0  # (a 2:2 tile is 34 px) the same for every player count: the footer buttons must stay on screen
 	for i in n:
-		var col := FinalColumn.new(gs.players[i], results[i], cell, tooltip)
+		var ids: Array = []
+		for e in gs.cards_drawn_by(i):
+			ids.append(e["id"])
+		var col := FinalColumn.new(gs.players[i], results[i], cell, tooltip, ids)
 		col.cards_pressed.connect(show_cards.bind(i))
+		col.city_pressed.connect(show_city.bind(i))
 		columns.append(col)
 		row.add_child(col)
 	return row
@@ -202,7 +207,6 @@ func _show_scoreboard() -> void:
 	scoreboard.cities_pressed.connect(func(): goto("cities"))
 	scoreboard.again_pressed.connect(_play_again)
 	scoreboard.menu_pressed.connect(_to_menu)
-	scoreboard.cards_pressed.connect(show_cards)
 	overlays.add_child(scoreboard)
 
 
@@ -211,6 +215,13 @@ func show_cards(index: int) -> void:
 	tooltip.hide_tip()
 	Sfx.play("click")
 	overlays.add_child(CardHistoryOverlay.new(gs, index))
+
+
+## Opens planner `index`'s city big, with the timeline of how it grew.
+func show_city(index: int) -> void:
+	tooltip.hide_tip()
+	Sfx.play("click")
+	overlays.add_child(CityTimelineOverlay.new(gs, index, tooltip))
 
 
 func _play_again() -> void:

@@ -10,6 +10,12 @@ enum Kind {
 	PARK, TREES, ROAD,
 }
 
+## Tiles that cover 2x2 squares of the 14x14 mat. Every other tile (and every road you can buy) covers 1x1.
+const BIG_KINDS := [
+	Kind.APT_L, Kind.STUDENT_L, Kind.UNIVERSITY, Kind.LIBRARY, Kind.HOSPITAL, Kind.SCHOOL,
+	Kind.SUPERMARKET, Kind.RESTAURANT, Kind.PARK, Kind.PARKING,
+]
+
 const CAT_BUILDING := "Building"
 const CAT_AMENITY := "Amenity"
 const CAT_GREEN := "Green space"
@@ -51,20 +57,20 @@ const HOUSEHOLDS := {
 		{"name": "Worker", "members": ["worker"], "qty": 4, "art": "home_small_worker"},
 		{"name": "Older person", "members": ["older"], "qty": 4, "art": "home_small_older"},
 		{"name": "Resident with a disability", "members": ["access"], "qty": 5, "art": "home_small_access"},
-		{"name": "Expat", "members": ["expat"], "qty": 5, "art": "home_small_expat"},
+		{"name": "International resident", "members": ["expat"], "qty": 5, "art": "home_small_expat"},
 	],
 	Kind.APT_M: [
 		{"name": "Working couple", "members": ["worker", "worker"], "qty": 3, "art": "home_medium_working_couple"},
 		{"name": "Older couple", "members": ["older", "older"], "qty": 3, "art": "home_medium_older_couple"},
 		{"name": "Parent and child", "members": ["worker", "child"], "qty": 4, "art": "home_medium_parent_child"},
 		{"name": "Carer and resident", "members": ["worker", "access"], "qty": 4, "art": "home_medium_carer"},
-		{"name": "Expat couple", "members": ["expat", "expat"], "qty": 4, "art": "home_medium_expat_couple"},
+		{"name": "International couple", "members": ["expat", "expat"], "qty": 4, "art": "home_medium_expat_couple"},
 	],
 	Kind.APT_L: [
 		{"name": "Family", "members": ["worker", "worker", "child"], "qty": 4, "art": "home_large_family"},
 		{"name": "Three generations", "members": ["older", "worker", "child"], "qty": 4, "art": "home_large_three_generations"},
 		{"name": "Shared house", "members": ["student", "access", "expat"], "qty": 3, "art": "home_large_shared_house"},
-		{"name": "Expat family", "members": ["expat", "expat", "child"], "qty": 3, "art": "home_large_expat_family"},
+		{"name": "International family", "members": ["expat", "expat", "child"], "qty": 3, "art": "home_large_expat_family"},
 	],
 	Kind.STUDENT_S: [
 		{"name": "Students", "members": ["student"], "qty": 8, "art": "student_small"},
@@ -172,7 +178,7 @@ const DEFS := {
 	},
 	Kind.PARK: {
 		"name": "Park", "cost": 4, "qty": 8, "citizens": 0, "category": CAT_GREEN,
-		"effect": "+1 happiness in its 3x3 area. Pollution -3. Shades adjacent roads. Children need a park in their 3x3 area.",
+		"effect": "+1 happiness for homes within 2 squares of it. Pollution -3. Shades adjacent roads. Children need a park within 2 squares of their home.",
 		"objectives": ["O3", "O4"], "art": "park",
 	},
 	Kind.TREES: {
@@ -230,6 +236,24 @@ static func street_suits(tile: Dictionary) -> Array:
 	if tile["kind"] != Kind.ROAD:
 		return []
 	return STREETS[tile.get("variant", 0)]["suits"]
+
+
+## How many squares of the mat a kind covers along each side: 1 (a 1:1 tile) or 2 (a 2:2 tile).
+static func kind_size(kind: int) -> int:
+	return 2 if kind in BIG_KINDS else 1
+
+
+## The same for a tile. Only a prefixed street can be a 2:2 road ("big").
+static func footprint(tile: Dictionary) -> int:
+	if tile.get("big", false):
+		return 2
+	return kind_size(tile["kind"])
+
+
+## "1:1" or "2:2".
+static func size_label(tile: Dictionary) -> String:
+	var n := footprint(tile)
+	return "%d:%d" % [n, n]
 
 
 static func citizens(kind: int) -> int:

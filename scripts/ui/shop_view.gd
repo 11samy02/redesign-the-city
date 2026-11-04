@@ -18,7 +18,9 @@ var cell := 60.0
 var gap := 6.0
 var pad := 12.0
 ## Space above the first row of each section for its heading.
-var head_h := 24.0
+var head_h := 22.0
+## Space at the top of the box for its title ("Construction site") and the tile counter.
+var title_h := 36.0
 ## Extra space between two sections that share a row.
 var block_gap := 14.0
 ## One view per stack, in stack order.
@@ -27,6 +29,7 @@ var views: Array = []
 var rows: Array = []
 
 var _heads: Array = []
+var _count_label: Label
 
 
 ## Creates one tile view per stack and lays them out. Sections that fit side by side share a row.
@@ -68,7 +71,7 @@ func build(stacks: Array, cell_size := 60.0, cell_gap := 6.0) -> void:
 	for s in starts:
 		has_head[s["row"]] = true
 	var row_y: Array[float] = []
-	var y := pad
+	var y := pad + title_h
 	for r in row_count:
 		if has_head[r]:
 			y += head_h
@@ -96,10 +99,28 @@ func build(stacks: Array, cell_size := 60.0, cell_gap := 6.0) -> void:
 		l.position = Vector2(_col_x(s["col"], s["col"] > 0), row_y[s["row"]] - head_h + 1)
 		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(l)
+		move_child(l, 0)
 		_heads.append(l)
 
 	custom_minimum_size = Vector2(2 * pad + COLS * cell + (COLS - 1) * gap + block_gap, y - gap + pad)
 	size = custom_minimum_size
+
+	# the box's own title row, so its top edge lines up with the boxes beside it
+	var title := UiKit.label("Construction site", 22, UiKit.LIMESTONE, "display_bold")
+	title.position = Vector2(pad + 2.0, pad - 3.0)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(title)
+	_count_label = UiKit.label("", 16, UiKit.MUTED)
+	_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_count_label.position = Vector2(pad, pad + 1.0)
+	_count_label.size = Vector2(size.x - 2.0 * pad - 2.0, 24.0)
+	_count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_count_label)
+
+
+func set_count(left: int) -> void:
+	if _count_label != null:
+		_count_label.text = "%d tiles left" % left
 
 
 func _col_x(col: int, shifted: bool) -> float:

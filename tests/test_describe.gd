@@ -63,7 +63,7 @@ func test_cell_lines_name_the_complaint_of_an_unhappy_citizen() -> void:
 func test_citizens_who_feel_the_same_share_a_block() -> void:
 	var cells := mat([EMPTY, "..lR...", EMPTY, EMPTY, EMPTY, EMPTY, CLEAN])
 	var r := Scoring.evaluate(cells, 0)
-	var text := _text(Describe.cell_lines(cells, r, 9))
+	var text := _text(Describe.cell_lines(cells, r, at(9)))
 	check(text.contains("2 Workers"), "the two workers who feel the same share a block")
 	eq(text.count("Child"), 1, "one child")
 
@@ -71,13 +71,13 @@ func test_citizens_who_feel_the_same_share_a_block() -> void:
 func test_service_lines_say_who_needs_them() -> void:
 	var cells := mat(["uRL....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, CLEAN])
 	var r := Scoring.evaluate(cells, 0)
-	var text := _text(Describe.cell_lines(cells, r, 2))
+	var text := _text(Describe.cell_lines(cells, r, at(2)))
 	check(text.contains("needed by 1 citizen") or text.contains("Needed by 1 citizen"), "the student needs the library")
 
 
 func test_a_service_nobody_reaches_warns_about_the_penalty() -> void:
 	var cells := mat(["L......", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	var r := Scoring.evaluate(cells, 0)
-	var text := _text(Describe.cell_lines(cells, r, 0))
+	var text := _text(Describe.cell_lines(cells, r, at(0)))
 	check(text.contains("No homes reach it"), "unreached")
 	check(text.contains("1 point"), "penalty is named")

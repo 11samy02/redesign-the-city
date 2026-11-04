@@ -45,7 +45,10 @@ func play_turn() -> void:
 			if await _pause(1.0):
 				return
 			continue
-		if await _buy_one(Bot.choose_purchase(gs, level, _rng)):
+		var move := Bot.choose_purchase(gs, level, _rng)
+		if move.is_empty():
+			break
+		if await _buy_one(move):
 			return
 	if _skipping:
 		await _finish_quickly(level)
@@ -95,6 +98,8 @@ func _finish_quickly(level: int) -> void:
 		var move: Array = await _next_purchase(gs, level)
 		if _screen_gone():
 			return
+		if move.is_empty():
+			break
 		var tile: Dictionary = gs.stack_tile(move[0])
 		if not gs.buy_and_place(move[0], move[1]):
 			break

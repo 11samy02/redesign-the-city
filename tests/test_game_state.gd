@@ -22,6 +22,17 @@ func _slot(gs: GameState, kind: int, variant := -1) -> int:
 	return -1
 
 
+## Buys a random affordable tile and builds it on a random lot where it fits.
+func _random_buy(gs: GameState, rng: RandomNumberGenerator) -> bool:
+	var slots := []
+	for i in gs.shop.size():
+		if gs.can_afford(i):
+			slots.append(i)
+	var slot: int = slots[rng.randi() % slots.size()]
+	var spots := Grid.valid_anchors(gs.current_player().cells, TileDefs.footprint(gs.shop[slot]["tile"]))
+	return gs.buy_and_place(slot, spots[rng.randi() % spots.size()])
+
+
 func _slot_with_cost(gs: GameState, cost: int) -> int:
 	for i in gs.shop.size():
 		if gs.stack_count(i) > 0 and TileDefs.tile_cost(gs.shop[i]["tile"]) == cost:
@@ -36,7 +47,7 @@ func test_setup_gives_each_player_the_starting_kit() -> void:
 		eq(p.money, 100, "everyone starts with 100 gold, whatever their seat")
 		eq(p.free_roads, 4, "free roads")
 		eq(p.loans, 0, "loans")
-		eq(p.cells.size(), 49, "mat size")
+		eq(p.cells.size(), 196, "mat size")
 	eq(GameState.ROUNDS, 8, "rounds")
 	eq(GameState.BUYS_PER_TURN, 4, "buys per turn")
 	eq(GameState.LOAN_AMOUNT, 20, "loan")
@@ -86,7 +97,7 @@ func test_buying_pays_places_and_shrinks_the_stack() -> void:
 	var before := gs.stack_count(slot)
 	check(gs.buy_and_place(slot, 5), "purchase should succeed")
 	var p = gs.current_player()
-	eq(p.money, 122, "a coffee shop costs 3")
+	eq(p.money, 97, "a coffee shop costs 3")
 	eq(gs.stack_count(slot), before - 1, "stack shrinks")
 	eq(p.cells[5]["kind"], K.COFFEE_SHOP, "tile on mat")
 	eq(gs.purchases, 1, "purchases")
@@ -165,9 +176,12 @@ func test_shaded_street_is_a_road_with_trees_built_in() -> void:
 	eq(plain["apartments"][0]["members"][0]["heat"], 1, "the plain 3-road walk is hot")
 	eq(r["apartments"][0]["members"][0]["heat"], 0, "a shaded street cools the walk")
 	eq(r["pollution"], plain["pollution"] - 1, "pollution -1, like trees")
-	check(r["shaded"][2], "it is shaded itself")
-	check(r["shaded"][1], "and shades the road next to it")
-	check(TileDefs.is_tree_like(cells[2]), "counts as trees")
+	check(r["shaded"][at(2)], "it is shaded itself")
+	var next_door := false
+	for c in Grid.squares_of(cells, at(1)):
+		next_door = next_door or r["shaded"][c]
+	check(next_door, "and shades the road next to it")
+	check(TileDefs.is_tree_like(cells[at(2)]), "counts as trees")
 	check(not TileDefs.is_tree_like(TileDefs.make(K.ROAD)), "a plain road is not trees")
 
 
@@ -197,8 +211,8 @@ func test_round_one_order_follows_the_seats() -> void:
 func test_later_rounds_start_with_the_fewest_points() -> void:
 	var gs := _new_game(3)
 	# nothing is within reach, so every home is unhappy: the bigger the home, the lower the score
-	gs.players[0].cells[0] = TileDefs.make(K.APT_S)
-	gs.players[2].cells[0] = TileDefs.make(K.APT_L)
+	Grid.place(gs.players[0].cells, 0, TileDefs.make(K.APT_S))
+	Grid.place(gs.players[2].cells, 0, TileDefs.make(K.APT_L))
 	_finish_round_with_roads(gs)
 	eq(gs.round_number, 2, "round 2")
 	eq(gs.turn_order(), [2, 0, 1], "lowest score first")
@@ -273,33 +287,47 @@ func test_full_games_end_after_eight_rounds() -> void:
 			while gs.purchases < GameState.BUYS_PER_TURN:
 				while gs.can_take_loan():
 					gs.take_loan()
-				var slots := []
-				for i in gs.shop.size():
-					if gs.can_afford(i):
-						slots.append(i)
-				var p = gs.current_player()
-				var empty := []
-				for c in 49:
-					if p.cells[c] == null:
-						empty.append(c)
-				check(gs.buy_and_place(slots[rng.randi() % slots.size()], empty[rng.randi() % empty.size()]), "bot purchase")
+				check(_random_buy(gs, rng), "bot purchase")
 			last = gs.end_turn()
 		eq(last, "game_over", "%d players: last event" % n)
 		check(gs.is_game_over(), "%d players: game over" % n)
 		eq(gs.round_number, 8, "%d players: round counter" % n)
 		for p in gs.players:
 			var bought := 0
-			for t in p.cells:
-				if t != null and not t.get("free", false):
+			for t in Grid.tiles(p.cells):
+				if not t.get("free", false):
 					bought += 1
 			eq(bought, 32, "%d players: 32 tiles bought" % n)
+
+
+func test_every_round_end_keeps_a_copy_of_every_city() -> void:
+	var gs := _new_game(2, 31)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9
+	var seen_at_round_one := -1
+	while not gs.is_game_over():
+		while gs.purchases < GameState.BUYS_PER_TURN:
+			while gs.can_take_loan():
+				gs.take_loan()
+			_random_buy(gs, rng)
+		gs.end_turn()
+		if gs.round_number == 2 and seen_at_round_one < 0:
+			seen_at_round_one = gs.city_history[0].size()
+	eq(seen_at_round_one, 1, "one copy after round 1")
+	for i in 2:
+		eq(gs.city_history[i].size(), GameState.ROUNDS, "player %d: a copy for every round" % i)
+		eq(gs.city_history[i][GameState.ROUNDS - 1]["cells"], gs.players[i].cells, "the last copy is the finished city")
+		var early: Array = gs.city_history[i][0]["cells"]
+		var after_one := Grid.tiles(early).size()
+		eq(after_one, GameState.BUYS_PER_TURN, "player %d: four tiles after round 1" % i)
+		check(gs.city_history[i][0]["cells"] != gs.players[i].cells, "player %d: the first copy is not the live mat" % i)
 
 
 func test_one_human_against_bots_also_reorders_after_round_one() -> void:
 	var gs := GameState.new()
 	gs.setup(["Ana", "Bot1", "Bot2"], [0, 1, 2], 7, [0, 1, 1])
-	gs.players[0].cells[0] = TileDefs.make(K.APT_S)
-	gs.players[2].cells[0] = TileDefs.make(K.APT_L)
+	Grid.place(gs.players[0].cells, 0, TileDefs.make(K.APT_S))
+	Grid.place(gs.players[2].cells, 0, TileDefs.make(K.APT_L))
 	_finish_round_with_roads(gs)
 	eq(gs.round_number, 2, "round 2")
 	eq(gs.turn_order(), [2, 0, 1], "lowest score first even with one human")

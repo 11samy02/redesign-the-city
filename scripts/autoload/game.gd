@@ -4,6 +4,7 @@ extends Node
 
 const GameState = preload("res://scripts/core/game_state.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
+const MatLibrary = preload("res://scripts/core/mat_library.gd")
 
 const TITLE_SCENE := "res://scenes/title.tscn"
 const GAME_SCENE := "res://scenes/game.tscn"
@@ -31,6 +32,8 @@ var settings := {
 	"bot_speed": 1,
 	"fast_animations": false,
 	"antialiasing": true,
+	## Path of the prefixed player mat everyone plays on (see MatLibrary); "" is an empty mat.
+	"mat": "res://resources/mats/01_southern_avenue.tres",
 }
 
 func _ready() -> void:
@@ -55,6 +58,14 @@ func _ready() -> void:
 			add_child(load("res://tests/click_probe.gd").new())
 		elif arg == "--probe=shots":
 			add_child(load("res://tests/shot_probe.gd").new())
+		elif arg == "--probe=rules":
+			add_child(load("res://tests/rules_probe.gd").new())
+		elif arg == "--probe=replace":
+			add_child(load("res://tests/replace_probe.gd").new())
+		elif arg == "--probe=title":
+			add_child(load("res://tests/title_probe.gd").new())
+		elif arg == "--probe=final":
+			add_child(load("res://tests/final_probe.gd").new())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -126,7 +137,7 @@ func new_game() -> void:
 		names.append(s["name"])
 		colors.append(s["color"])
 		bots.append(s.get("bot", 0))
-	state.setup(names, colors, -1, bots)
+	state.setup(names, colors, -1, bots, MatLibrary.by_path(settings["mat"]))
 
 
 ## Changes the scene with the tile transition. Ignored while a change is already running.

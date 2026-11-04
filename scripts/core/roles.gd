@@ -10,7 +10,7 @@ const CHILD := "child"
 const OLDER := "older"
 ## A resident with a disability: needs care and green space close by, long walks hurt more.
 const ACCESS := "access"
-## Someone who moved to Egkomi for work, from an embassy or an international company.
+## An international resident: someone who moved to Egkomi for work, from an embassy or an international company.
 const EXPAT := "expat"
 const IDS := [STUDENT, WORKER, CHILD, OLDER, ACCESS, EXPAT]
 
@@ -55,7 +55,7 @@ const DEFS := {
 		"dislike_kind": -1, "heat_factor": 2,
 	},
 	EXPAT: {
-		"name": "Expat", "plural": "Expats", "color": "#D8682B", "icon": "res://assets/ui/role_expat.svg",
+		"name": "International resident", "plural": "International residents", "color": "#D8682B", "icon": "res://assets/ui/role_expat.svg",
 		"needs": ["work", "dining"],
 		"like_kinds": [TileDefs.Kind.COFFEE_SHOP, TileDefs.Kind.PARKING, TileDefs.Kind.SCHOOL],
 		"like_streets": [TileDefs.STREET_BIKE],
@@ -63,7 +63,7 @@ const DEFS := {
 	},
 }
 
-## What can satisfy each need. "area" needs are met by a tile in the home's 3x3 area (the park
+## What can satisfy each need. "area" needs are met by a tile within reach of the home (see Scoring.PARK_REACH, the park
 ## rule), the others by a road route to a tile of one of the kinds.
 const NEEDS := {
 	"university": {"name": "University", "kinds": [TileDefs.Kind.UNIVERSITY], "area": false, "missing": "No university within reach"},

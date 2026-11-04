@@ -1,4 +1,4 @@
-"""Every household of Egkomi City gets its own building, so a player can tell who lives there at a glance.
+"""Every household of Redesign the City gets its own building, so a player can tell who lives there at a glance.
 
 Used by gen_art.py (run `python tools/gen_art.py` from the project root). The three apartments that were
 already drawn keep their picture under their household's name; the ten others are drawn here, with the same

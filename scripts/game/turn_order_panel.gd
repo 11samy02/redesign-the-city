@@ -18,13 +18,13 @@ var _last_order: Array = []
 
 func _init(gs) -> void:
 	_gs = gs
-	custom_minimum_size.x = 255
-	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	add_theme_constant_override("separation", 8)
-	_title = UiKit.label("Turn order", 22, UiKit.LIMESTONE, "display_bold")
+	custom_minimum_size.x = 268
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_theme_constant_override("separation", 6)
+	_title = UiKit.label("Turn order", 17, UiKit.LIMESTONE, "display_bold")
 	add_child(_title)
 	_cards = VBoxContainer.new()
-	_cards.add_theme_constant_override("separation", 8)
+	_cards.add_theme_constant_override("separation", 6)
 	add_child(_cards)
 	for i in _gs.players.size():
 		_refs.append(_make_card(i))
@@ -98,10 +98,10 @@ func _make_card(i: int) -> Dictionary:
 	pc.mouse_filter = Control.MOUSE_FILTER_STOP
 	pc.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 12)
+	h.add_theme_constant_override("separation", 8)
 	pc.add_child(h)
 	var mini := MatView.new()
-	mini.setup(11, 2, TileView.Mode.MINI, false)
+	mini.setup(3.8, 1, TileView.Mode.MINI, false)
 	h.add_child(mini)
 	var badge := _make_badge()
 	mini.add_child(badge)
@@ -110,7 +110,7 @@ func _make_card(i: int) -> Dictionary:
 	info.add_theme_constant_override("separation", 2)
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var top := HBoxContainer.new()
-	var name := UiKit.label(p.name, 18, UiKit.LIMESTONE, "display_bold")
+	var name := UiKit.label(p.name, 16, UiKit.LIMESTONE, "display_bold")
 	name.clip_text = true
 	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(name)

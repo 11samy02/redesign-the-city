@@ -1,5 +1,5 @@
 extends Control
-## Title screen: wordmark, a sample Egkomi block that builds itself, and seat setup.
+## Title screen: wordmark, a sample block that builds itself, and seat setup.
 
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
@@ -9,12 +9,27 @@ const RulesPanel = preload("res://scripts/ui/rules_panel.gd")
 const Modal = preload("res://scripts/ui/modal.gd")
 const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
 const Bot = preload("res://scripts/core/bot.gd")
+const MatView = preload("res://scripts/ui/mat_view.gd")
+const MatLibrary = preload("res://scripts/core/mat_library.gd")
+const Scoring = preload("res://scripts/core/scoring.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
 const MAX_SEATS := 4
 const MIN_SEATS := 2
-## Sample block shown on the right: T trees, P park, R road, s/m/l apartments, c/k/h/k amenities.
-const DIORAMA := ["TlRcP", "RRRRT", "mPRhR", "sTRkm"]
-const DIO_CELL := 104.0
+## Sample block shown on the right, 10 x 8 squares: T trees, P park, R road, s/m/l apartments, c coffee shop, h clinic,
+## k supermarket. A 2:2 tile is written as a 2x2 block of its letter, so the block shows both tile sizes.
+const DIORAMA := [
+	"TllRPPRcsT",
+	"RllRPPRmTR",
+	"RRRRRRRRRR",
+	"kkRhRsRllT",
+	"kkRTRmRllc",
+	"RRRRRRRRRR",
+	"TmRPPRkkRs",
+	"sTRPPRkkRm",
+]
+const DIO_CELL := 50.0
+const DIO_GAP := 4.0
 ## Names offered to computer planners.
 const BOT_NAMES := ["Nikos", "Eleni", "Maria", "Andreas", "Sofia", "Kostas"]
 const SEAT_KINDS := ["Human", "Easy bot", "Medium bot", "Hard bot"]
@@ -25,6 +40,9 @@ var _overlays: Control
 var _modal := false
 var _diorama: Control
 var _dio_views: Array = []
+var _mats: Array = []
+var _mat_note: Label
+var _mat_preview: MatView
 
 
 func _ready() -> void:
@@ -38,8 +56,8 @@ func _ready() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 90)
 	margin.add_theme_constant_override("margin_right", 70)
-	margin.add_theme_constant_override("margin_top", 50)
-	margin.add_theme_constant_override("margin_bottom", 40)
+	margin.add_theme_constant_override("margin_top", 32)
+	margin.add_theme_constant_override("margin_bottom", 24)
 	add_child(margin)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 60)
@@ -47,16 +65,16 @@ func _ready() -> void:
 
 	var left := VBoxContainer.new()
 	left.custom_minimum_size.x = 730
-	left.add_theme_constant_override("separation", 18)
+	left.add_theme_constant_override("separation", 12)
 	row.add_child(left)
 	var mark := VBoxContainer.new()
-	mark.add_theme_constant_override("separation", -34)
-	mark.add_child(UiKit.label("Egkomi", 116, UiKit.LIMESTONE, "display_bold"))
-	mark.add_child(UiKit.label("City", 116, UiKit.LIMESTONE, "display_bold"))
+	mark.add_theme_constant_override("separation", -26)
+	mark.add_child(UiKit.label("Redesign", 92, UiKit.LIMESTONE, "display_bold"))
+	mark.add_child(UiKit.label("the City", 92, UiKit.LIMESTONE, "display_bold"))
 	left.add_child(mark)
 	var tag := UiKit.label("Plan streets, shade and parks so every citizen of Egkomi can walk, breathe and get where they need to go.", 20, UiKit.MUTED)
 	tag.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tag.custom_minimum_size.x = 560
+	tag.custom_minimum_size.x = 700
 	left.add_child(tag)
 
 	var setup := PanelContainer.new()
@@ -72,7 +90,7 @@ func _ready() -> void:
 	head.add_child(UiKit.label("2 to 4 planners on this computer", 15, UiKit.MUTED))
 	sv.add_child(head)
 	_seat_box = VBoxContainer.new()
-	_seat_box.add_theme_constant_override("separation", 10)
+	_seat_box.add_theme_constant_override("separation", 8)
 	sv.add_child(_seat_box)
 	var seat_actions := HBoxContainer.new()
 	seat_actions.add_theme_constant_override("separation", 10)
@@ -83,6 +101,7 @@ func _ready() -> void:
 	solo.pressed.connect(_setup_solo)
 	seat_actions.add_child(solo)
 	sv.add_child(seat_actions)
+	sv.add_child(_build_mat_picker())
 	left.add_child(setup)
 
 	var actions := HBoxContainer.new()
@@ -105,7 +124,7 @@ func _ready() -> void:
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(right)
 	_diorama = Control.new()
-	_diorama.custom_minimum_size = Vector2(5 * DIO_CELL + 4 * 8, 4 * DIO_CELL + 3 * 8)
+	_diorama.custom_minimum_size = Vector2(10 * DIO_CELL + 9 * DIO_GAP, 8 * DIO_CELL + 7 * DIO_GAP)
 	right.add_child(_diorama)
 
 	_overlays = Control.new()
@@ -149,30 +168,42 @@ func _dio_tile(ch: String) -> Variant:
 
 
 func _build_diorama() -> void:
-	var w := 5
-	var h := 4
-	var tiles: Array = []
-	for row in DIORAMA:
-		for ch in row:
-			tiles.append(_dio_tile(ch))
-	for i in tiles.size():
-		var x := i % w
-		var y := i / w
+	var w := 10
+	var h := 8
+	# (letter, top-left square, size) for every tile: a 2:2 tile is a 2x2 block of its letter
+	var placed: Array = []
+	var seen := {}
+	for y in h:
+		for x in w:
+			var i := y * w + x
+			if seen.has(i):
+				continue
+			var tile = _dio_tile(DIORAMA[y][x])
+			var n := TileDefs.footprint(tile)
+			for dy in n:
+				for dx in n:
+					seen[(y + dy) * w + x + dx] = true
+			placed.append({"tile": tile, "x": x, "y": y, "n": n})
+	var kinds := {}
+	for p in placed:
+		for dy in p["n"]:
+			for dx in p["n"]:
+				kinds[(p["y"] + dy) * w + p["x"] + dx] = p["tile"]["kind"]
+	for p in placed:
 		var v := TileView.new()
 		v.mode = TileView.Mode.MINI
-		v.tile = tiles[i]
-		if tiles[i]["kind"] == TileDefs.Kind.ROAD:
+		v.tile = p["tile"]
+		if p["tile"]["kind"] == TileDefs.Kind.ROAD:
 			var mask := 0
 			for d in [[0, -1, 1], [1, 0, 2], [0, 1, 4], [-1, 0, 8]]:
-				var nx: int = x + d[0]
-				var ny: int = y + d[1]
-				if nx >= 0 and ny >= 0 and nx < w and ny < h:
-					var k: int = tiles[ny * w + nx]["kind"]
-					if k == TileDefs.Kind.ROAD:
-						mask |= d[2]
+				var nx: int = p["x"] + d[0]
+				var ny: int = p["y"] + d[1]
+				if nx >= 0 and ny >= 0 and nx < w and ny < h and kinds[ny * w + nx] == TileDefs.Kind.ROAD:
+					mask |= d[2]
 			v.road_mask = mask
-		v.size = Vector2(DIO_CELL, DIO_CELL)
-		v.position = Vector2(x * (DIO_CELL + 8), y * (DIO_CELL + 8))
+		var side: float = p["n"] * DIO_CELL + (p["n"] - 1) * DIO_GAP
+		v.size = Vector2(side, side)
+		v.position = Vector2(p["x"] * (DIO_CELL + DIO_GAP), p["y"] * (DIO_CELL + DIO_GAP))
 		v.mouse_default_cursor_shape = Control.CURSOR_ARROW
 		v.hovered.connect(func(view, inside):
 			if inside:
@@ -182,20 +213,84 @@ func _build_diorama() -> void:
 		_diorama.add_child(v)
 		_dio_views.append(v)
 	# build order: diagonal sweep from the top-left corner
-	var order := range(tiles.size())
-	order.sort_custom(func(a, b): return (a % w + a / w) < (b % w + b / w))
+	var order := range(placed.size())
+	order.sort_custom(func(a, b): return (placed[a]["x"] + placed[a]["y"]) < (placed[b]["x"] + placed[b]["y"]))
 	for n in order.size():
 		var v = _dio_views[order[n]]
 		var final_y: float = v.position.y
-		v.position.y = final_y - 70
+		v.position.y = final_y - 50
 		v.anim_scale = 0.7
 		var tw := create_tween().set_parallel()
-		var delay := 0.5 + n * 0.07
+		var delay := 0.5 + n * 0.02
 		tw.tween_property(v, "modulate:a", 1.0, 0.2).set_delay(delay)
-		tw.tween_property(v, "position:y", final_y, 0.45).set_delay(delay).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.tween_property(v, "anim_scale", 1.0, 0.45).set_delay(delay).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		if n % 3 == 0:
-			tw.tween_callback(func(): Sfx.play("tick", 0.8 + n * 0.03)).set_delay(delay + 0.3)
+		tw.tween_property(v, "position:y", final_y, 0.4).set_delay(delay).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(v, "anim_scale", 1.0, 0.4).set_delay(delay).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		if n % 8 == 0:
+			tw.tween_callback(func(): Sfx.play("tick", 0.8 + n * 0.01)).set_delay(delay + 0.3)
+
+
+# ---------------------------------------------------------------- player mat
+
+## The "Player mat" part of the setup box: a drop-down of the prefixed mats (and an empty one), what the chosen
+## one holds, and a small picture of it. Everyone in the game builds on the chosen mat.
+func _build_mat_picker() -> Control:
+	_mats = MatLibrary.all()
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", 16)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	head.add_child(UiKit.label("Player mat", 20, UiKit.LIMESTONE, "display_bold"))
+	head.add_child(UiKit.label("the same for everyone", 14, UiKit.MUTED))
+	col.add_child(head)
+	var pick := OptionButton.new()
+	pick.add_item("Empty mat")
+	var current := 0
+	for k in _mats.size():
+		pick.add_item(_mats[k].title)
+		if _mats[k].resource_path == Game.settings["mat"]:
+			current = k + 1
+	pick.select(current)
+	pick.focus_mode = Control.FOCUS_NONE
+	pick.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pick.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	pick.tooltip_text = "Some mats start with streets and buildings already built. They can't be replaced."
+	UiKit.style_button(pick, "secondary")
+	pick.add_theme_font_override("font", UiKit.font("display"))
+	pick.add_theme_font_size_override("font_size", 17)
+	pick.item_selected.connect(_on_mat_picked)
+	col.add_child(pick)
+	# one line, so the setup box keeps its height whatever mat is picked (the full text is the tooltip)
+	_mat_note = UiKit.label("", 15, UiKit.MUTED)
+	_mat_note.clip_text = true
+	_mat_note.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_mat_note.custom_minimum_size.x = 380
+	col.add_child(_mat_note)
+	box.add_child(col)
+	_mat_preview = MatView.new()
+	_mat_preview.setup(5.0, 1.0, TileView.Mode.MINI, false)
+	_mat_preview.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	box.add_child(_mat_preview)
+	_show_mat(current)
+	return box
+
+
+func _on_mat_picked(index: int) -> void:
+	Sfx.play("click")
+	Game.set_setting("mat", _mats[index - 1].resource_path if index > 0 else "")
+	_show_mat(index)
+
+
+func _show_mat(index: int) -> void:
+	var preset = _mats[index - 1] if index > 0 else null
+	var cells: Array = preset.build_cells() if preset != null else Grid.empty()
+	_mat_preview.refresh(cells, Scoring.evaluate(cells, 0))
+	var note: String = "A blank 14 x 14 mat. Build anywhere." if preset == null else preset.description
+	_mat_note.text = note
+	_mat_note.tooltip_text = note
+	_mat_note.mouse_filter = Control.MOUSE_FILTER_PASS
 
 
 # ---------------------------------------------------------------- seats

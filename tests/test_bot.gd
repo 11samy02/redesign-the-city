@@ -5,6 +5,8 @@ const Bot = preload("res://scripts/core/bot.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const BotPlanner = preload("res://scripts/core/bot_planner.gd")
 const Roles = preload("res://scripts/core/roles.gd")
+const Legacy = preload("res://tests/legacy_cards.gd")
+const MatLibrary = preload("res://scripts/core/mat_library.gd")
 
 
 ## Whole-game tests that only check the rules (games finish, roads get spent) do not need Hard's
@@ -49,6 +51,29 @@ func _play_out(gs: GameState, rng: RandomNumberGenerator) -> bool:
 			road = Bot.choose_free_road(gs, level, rng)
 		gs.end_turn()
 	return true
+
+
+## Bots build around the tiles a prefixed mat comes with, and a whole game finishes on every shipped mat.
+func test_bots_finish_games_on_every_prefixed_mat() -> void:
+	_quick_search()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 8
+	for mat in MatLibrary.all():
+		for level in [Bot.EASY, Bot.MEDIUM, Bot.HARD]:
+			var gs := GameState.new()
+			gs.setup(["A", "B"], [0, 1], 40 + level, [level, level], mat)
+			check(_play_out(gs, rng), "%s: two level %d bots finish" % [mat.title, level])
+			for p in gs.players:
+				var fixed := 0
+				var built := 0
+				for t in Grid.tiles(p.cells):
+					if t.get("fixed", false):
+						fixed += 1
+					elif not t.get("free", false):
+						built += 1
+				eq(fixed, mat.tiles.size(), "%s: the prefixed tiles are all still there" % mat.title)
+				eq(built, 32, "%s: 32 tiles were bought" % mat.title)
+	_full_search()
 
 
 func test_setup_stores_bot_levels() -> void:
@@ -147,10 +172,7 @@ func test_full_games_finish_for_every_player_count_and_level() -> void:
 			var gs := _game(levels, 900 + n * 10 + level)
 			check(_play_out(gs, rng), "%d seats at level %d finish" % [n, level])
 			for p in gs.players:
-				var tiles := 0
-				for t in p.cells:
-					if t != null:
-						tiles += 1
+				var tiles := Grid.tiles(p.cells).size()
 				eq(tiles, 36, "%d seats, level %d: 32 bought tiles + 4 free roads" % [n, level])
 	_full_search()
 
@@ -276,6 +298,7 @@ func test_bots_build_and_serve_every_kind_of_citizen() -> void:
 
 func test_bots_resolve_a_choice_card_on_their_own() -> void:
 	var gs := _game([Bot.MEDIUM, Bot.MEDIUM], 14)
+	Legacy.ensure("bribery_scandal")
 	gs.begin_card("bribery_scandal")
 	var rng := RandomNumberGenerator.new()
 	var pick := Bot.choose_card_option(gs, rng)
@@ -329,7 +352,7 @@ func test_full_games_with_turn_cards_finish_and_stay_sane() -> void:
 			eq(gs.card_log.size(), n * GameState.ROUNDS, "%d seats: one card per turn" % n)
 			for p in gs.players:
 				check(p.money >= 0, "gold never below zero")
-				check(p.cells.count(null) < 49, "something was built")
+				check(Grid.tiles(p.cells).size() > 0, "something was built")
 
 
 func test_bots_price_tiles_the_way_the_shop_does_after_a_card() -> void:
@@ -337,6 +360,7 @@ func test_bots_price_tiles_the_way_the_shop_does_after_a_card() -> void:
 	rng.seed = 4
 	for level in [Bot.EASY, Bot.MEDIUM, Bot.HARD]:
 		var gs := _game([level, level], 21)
+		Legacy.ensure("price_hike")
 		gs.begin_card("price_hike")
 		gs.resolve_turn_card()
 		# exactly enough for the cheapest tile once everything costs 2 more
@@ -344,6 +368,7 @@ func test_bots_price_tiles_the_way_the_shop_does_after_a_card() -> void:
 		var move := Bot.choose_purchase(gs, level, rng)
 		check(gs.can_afford(move[0]), "level %d picked a tile it can afford (slot %d costs %d with 2 gold)" % [level, move[0], gs.price_of(gs.shop[move[0]]["tile"])])
 		var gs2 := _game([level, level], 22)
+		Legacy.ensure("tree_planting_campaign")
 		gs2.begin_card("tree_planting_campaign")
 		gs2.resolve_turn_card()
 		gs2.current_player().money = 0

@@ -10,17 +10,25 @@ const Tooltip = preload("res://scripts/ui/tooltip.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const Bot = preload("res://scripts/core/bot.gd")
 const Roles = preload("res://scripts/core/roles.gd")
+const Face = preload("res://scripts/game/circumstance_card_face.gd")
 
+## The turn-card thumbnails were clicked.
 signal cards_pressed
+## The city itself was clicked: the planner wants the big view with the timeline.
+signal city_pressed
+
+const THUMB_W := 38.0
 
 var mat: MatView
 var rank_label: Label
-## Tile tooltips and the card history stay off until the tally has finished counting.
+## Tile tooltips, the big city view and the card history stay off until the tally has finished counting.
 var inspectable := false:
 	set(v):
 		inspectable = v
-		if _cards_btn != null:
-			_cards_btn.disabled = not v
+		if _thumbs != null:
+			_thumbs.modulate.a = 1.0 if v else 0.45
+		if mat != null:
+			mat.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if v else Control.CURSOR_ARROW
 
 var _player
 var _result: Dictionary
@@ -33,30 +41,34 @@ var _loans: Label
 var _unused: Label
 var _variety: Label
 var _cards: Label
-var _cards_btn: Button
+var _thumbs: HBoxContainer
 var _complaints: HBoxContainer
+var _card_ids: Array
 
 
-func _init(player, result: Dictionary, cell: float, tooltip: Tooltip) -> void:
+## `card_ids` are the turn cards this planner drew, oldest first.
+func _init(player, result: Dictionary, cell: float, tooltip: Tooltip, card_ids: Array = []) -> void:
 	_player = player
 	_result = result
 	_tooltip = tooltip
+	_card_ids = card_ids
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	var col := UiKit.player_color(player.color_index)
-	var sb := UiKit.box(UiKit.PANEL, 22, 0, Color.TRANSPARENT, 18)
+	var sb := UiKit.box(UiKit.PANEL, 22, 0, Color.TRANSPARENT, 14)
 	sb.border_width_top = 8
 	sb.border_color = col
 	add_theme_stylebox_override("panel", sb)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 7)
+	v.add_theme_constant_override("separation", 8)
 	add_child(v)
 	v.add_child(_build_head(col))
 	v.add_child(_build_mat(cell))
-	v.add_child(_build_lines())
 	v.add_child(_build_total())
+	v.add_child(_build_stats())
+	v.add_child(_build_thumbs())
 	_complaints = HBoxContainer.new()
 	_complaints.add_theme_constant_override("separation", 6)
-	_complaints.custom_minimum_size.y = 34
+	_complaints.custom_minimum_size.y = 26
 	v.add_child(_complaints)
 
 
@@ -67,8 +79,8 @@ func count(screen) -> void:
 	pivot_offset = size / 2
 	if screen.speed > 0.0:
 		create_tween().tween_property(self, "scale", Vector2.ONE * 1.03, 0.2)
-	_pollution.text = "%d, %s" % [r["pollution"], "no effect" if r["pollution_penalty"] == 0 else "-%d per citizen" % r["pollution_penalty"]]
-	_pollution.add_theme_color_override("font_color", UiKit.OLIVE if r["pollution_penalty"] == 0 else UiKit.HEAT)
+	_show_stat(_pollution, str(r["pollution"]), 1 if r["pollution_penalty"] == 0 else -1,
+		"Pollution %d: %s." % [r["pollution"], "no effect" if r["pollution_penalty"] == 0 else "every citizen loses %d point%s" % [r["pollution_penalty"], "" if r["pollution_penalty"] == 1 else "s"]])
 	await _count_homes(screen)
 	await _count_loans(screen)
 	await _count_unused(screen)
@@ -83,7 +95,7 @@ func count(screen) -> void:
 func _build_head(col: Color) -> Control:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 10)
-	var av := Widgets.Avatar.new(44)
+	var av := Widgets.Avatar.new(38)
 	av.color = col
 	av.letter = _player.name.substr(0, 1).to_upper()
 	head.add_child(av)
@@ -100,58 +112,129 @@ func _build_head(col: Color) -> Control:
 
 func _build_mat(cell: float) -> Control:
 	mat = MatView.new()
-	mat.setup(cell, 5, TileView.Mode.MAT)
+	mat.setup(cell, 2, TileView.Mode.MAT)
 	mat.refresh(_player.cells, _result)
 	for view in mat.views:
 		view.apartment_info = null
 		view.badge_text = ""
 	mat.cell_hovered.connect(_on_cell_hovered)
+	mat.mouse_filter = Control.MOUSE_FILTER_PASS
+	mat.gui_input.connect(_on_mat_input)
+	mat.cell_pressed.connect(func(_c): _open_city())
+	mat.mouse_entered.connect(func(): _hint_hover(true))
+	mat.mouse_exited.connect(func(): _hint_hover(false))
 	var mc := CenterContainer.new()
 	mc.add_child(mat)
 	return mc
 
 
-func _build_lines() -> Control:
-	var lines := VBoxContainer.new()
-	lines.add_theme_constant_override("separation", 3)
-	_citizens = _line(lines, "Citizens")
-	_pollution = _line(lines, "Pollution")
-	_loans = _line(lines, "Loans")
-	_unused = _line(lines, "Unused places")
-	_variety = _line(lines, "Variety")
-	_cards = _line(lines, "Turn cards")
-	_cards_btn = UiKit.button("Show cards", "ghost", 14)
-	_cards_btn.disabled = true
-	_cards_btn.tooltip_text = "See every card this planner drew and what it did to the score."
-	_cards_btn.pressed.connect(cards_pressed.emit)
-	_cards.get_parent().add_child(_cards_btn)
+## A click anywhere on the city, on a lot or between them, opens the big view.
+func _on_mat_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_open_city()
+		mat.accept_event()
+
+
+func _open_city() -> void:
+	if inspectable:
+		city_pressed.emit()
+
+
+func _hint_hover(inside: bool) -> void:
+	if not inspectable:
+		return
+	mat.create_tween().tween_property(mat, "modulate", Color(1.12, 1.12, 1.12) if inside else Color.WHITE, 0.12)
+
+
+## Six small tiles instead of a table: a caption over one number, the colour says good or bad.
+func _build_stats() -> Control:
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	_citizens = _stat(grid, "Happy")
+	_pollution = _stat(grid, "Pollution")
+	_loans = _stat(grid, "Loans")
+	_unused = _stat(grid, "Unused")
+	_variety = _stat(grid, "Variety")
+	_cards = _stat(grid, "Cards")
+	for l in [_citizens, _pollution, _loans, _unused, _variety, _cards]:
+		_show_stat(l, "-", 0)
+	return grid
+
+
+func _stat(parent: Control, caption: String) -> Label:
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.PANEL_HI, 0.7), 12, 0, Color.TRANSPARENT, 5))
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 10)
-	box.add_child(lines)
-	var rule := ColorRect.new()
-	rule.color = UiKit.LINE
-	rule.custom_minimum_size.y = 2
-	box.add_child(rule)
-	return box
+	box.add_theme_constant_override("separation", -4)
+	panel.add_child(box)
+	var cap := UiKit.label(caption, 13, UiKit.MUTED, "body_bold")
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(cap)
+	var value := UiKit.label("", 23, UiKit.LIMESTONE, "display_bold")
+	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(value)
+	parent.add_child(panel)
+	return value
+
+
+## Shows a stat: `text`, in green when it helps, red when it hurts, grey when it changes nothing.
+func _show_stat(label: Label, text: String, effect: int, tip := "") -> void:
+	label.text = text
+	label.add_theme_color_override("font_color", UiKit.OLIVE if effect > 0 else (UiKit.HEAT if effect < 0 else UiKit.MUTED))
+	label.get_parent().get_parent().tooltip_text = tip
+
+
+## The turn cards this planner drew, as a row of small card faces. Click them for the full grid.
+func _build_thumbs() -> Control:
+	_thumbs = HBoxContainer.new()
+	_thumbs.add_theme_constant_override("separation", 5)
+	_thumbs.alignment = BoxContainer.ALIGNMENT_CENTER
+	_thumbs.custom_minimum_size.y = Face.HEIGHT * THUMB_W / Face.WIDTH
+	_thumbs.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_thumbs.tooltip_text = "Turn cards drawn. Click to see them."
+	_thumbs.modulate.a = 0.45
+	if _card_ids.is_empty():
+		_thumbs.add_child(UiKit.label("No turn cards drawn", 15, UiKit.MUTED))
+		_thumbs.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		_thumbs.tooltip_text = ""
+		return _thumbs
+	var s := THUMB_W / Face.WIDTH
+	for id in _card_ids:
+		var slot := Control.new()
+		slot.custom_minimum_size = Vector2(THUMB_W, Face.HEIGHT * s)
+		slot.mouse_filter = Control.MOUSE_FILTER_PASS
+		slot.pivot_offset = slot.custom_minimum_size / 2.0
+		var face := Face.front_turn(id)
+		face.size = Vector2(Face.WIDTH, Face.HEIGHT)
+		face.scale = Vector2.ONE * s
+		face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot.add_child(face)
+		slot.mouse_entered.connect(func():
+			if inspectable:
+				slot.create_tween().tween_property(slot, "scale", Vector2.ONE * 1.18, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT))
+		slot.mouse_exited.connect(func():
+			slot.create_tween().tween_property(slot, "scale", Vector2.ONE, 0.12))
+		slot.gui_input.connect(func(e):
+			if inspectable and e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+				cards_pressed.emit()
+				slot.accept_event())
+		_thumbs.add_child(slot)
+	return _thumbs
 
 
 func _build_total() -> Control:
 	var total_row := HBoxContainer.new()
-	total_row.add_child(UiKit.label("Total", 24, UiKit.LIMESTONE, "display_bold"))
+	var caption := UiKit.label("Total", 22, UiKit.MUTED, "display_bold")
+	caption.size_flags_vertical = Control.SIZE_SHRINK_END
+	total_row.add_child(caption)
 	total_row.add_child(UiKit.spacer())
-	_total = UiKit.label("0", 52, UiKit.LIMESTONE, "display_bold")
+	_total = UiKit.label("0", 46, UiKit.LIMESTONE, "display_bold")
 	total_row.add_child(_total)
 	return total_row
-
-
-func _line(parent: Control, caption: String) -> Label:
-	var h := HBoxContainer.new()
-	h.add_child(UiKit.label(caption, 17, UiKit.MUTED))
-	h.add_child(UiKit.spacer())
-	var l := UiKit.label("", 17, UiKit.LIMESTONE, "body_bold")
-	h.add_child(l)
-	parent.add_child(h)
-	return l
 
 
 func _on_cell_hovered(c: int, inside: bool) -> void:
@@ -179,21 +262,23 @@ func _count_homes(screen) -> void:
 		view.apartment_info = a
 		view.pop(0.18)
 		counted += a["citizens"]
-		_citizens.text = "%d counted" % counted
+		_show_stat(_citizens, str(counted), 0)
 		if screen.speed > 0.0:
 			var center: Vector2 = view.get_global_rect().get_center()
 			Widgets.float_text(screen.fx, Describe.signed(a["sp"]) if a["sp"] != 0 else "0", center, TileView.face_color(a["happiness"]), 30)
 			Sfx.play("tick" if a["sp"] >= 0 else "minus", 1.0 + clampf(_running * 0.02, -0.3, 0.6))
 		_set_total(_running + a["sp"], screen.speed)
 		await screen.wait(0.32)
-	_citizens.text = "%d, %d happy" % [_result["citizens"], _result["happy_citizens"]]
+	_show_stat(_citizens, "%d/%d" % [_result["happy_citizens"], _result["citizens"]], 1 if _result["unhappy_citizens"] == 0 and _result["citizens"] > 0 else (-1 if _result["unhappy_citizens"] > 0 else 0),
+		"%d of %d citizens are happy." % [_result["happy_citizens"], _result["citizens"]])
 	if _result["apartments"].is_empty():
-		_citizens.text = "None housed"
+		_show_stat(_citizens, "0", 0, "Nobody is housed.")
 
 
 func _count_loans(screen) -> void:
 	var r := _result
-	_loans.text = "%d, -%d points" % [r["loans"], r["loan_penalty"]] if r["loans"] > 0 else "None"
+	_show_stat(_loans, "-%d" % r["loan_penalty"] if r["loans"] > 0 else "0", -1 if r["loans"] > 0 else 0,
+		"%d loan%s: -%d points." % [r["loans"], "" if r["loans"] == 1 else "s", r["loan_penalty"]] if r["loans"] > 0 else "No loans.")
 	for k in r["loans"]:
 		var cost := Scoring.loan_penalty(k + 1) - Scoring.loan_penalty(k)
 		if screen.speed > 0.0:
@@ -210,9 +295,8 @@ func _count_variety(screen) -> void:
 	var names: Array[String] = []
 	for role in r["variety_roles"]:
 		names.append(Roles.DEFS[role]["name"])
-	_variety.text = "%d of %d kinds, %s" % [kinds, Roles.IDS.size(), Describe.points(r["variety_bonus"])] if r["variety_bonus"] > 0 else "%d of %d kinds" % [kinds, Roles.IDS.size()]
-	_variety.tooltip_text = "Kinds of citizen with at least one happy citizen: %s." % (", ".join(names) if not names.is_empty() else "none")
-	_variety.mouse_filter = Control.MOUSE_FILTER_PASS
+	_show_stat(_variety, Describe.signed(r["variety_bonus"]) if r["variety_bonus"] > 0 else "0", 1 if r["variety_bonus"] > 0 else 0,
+		"%d of %d kinds of citizen have a happy citizen: %s." % [kinds, Roles.IDS.size(), ", ".join(names) if not names.is_empty() else "none"])
 	if r["variety_bonus"] <= 0:
 		return
 	if screen.speed > 0.0:
@@ -225,7 +309,7 @@ func _count_variety(screen) -> void:
 ## Points won or lost through event and penalty cards.
 func _count_cards(screen) -> void:
 	var pts: int = _result["card_points"]
-	_cards.text = Describe.points(pts) if pts != 0 else "None"
+	_show_stat(_cards, Describe.signed(pts) if pts != 0 else "0", signi(pts), "Points from event and penalty cards." if pts != 0 else "The turn cards changed no points.")
 	if pts == 0:
 		return
 	if screen.speed > 0.0:
@@ -237,7 +321,8 @@ func _count_cards(screen) -> void:
 
 func _count_unused(screen) -> void:
 	var r := _result
-	_unused.text = "%d, -%d point%s" % [r["unused"].size(), r["unused_penalty"], "" if r["unused_penalty"] == 1 else "s"] if r["unused_penalty"] > 0 else "None"
+	_show_stat(_unused, "-%d" % r["unused_penalty"] if r["unused_penalty"] > 0 else "0", -1 if r["unused_penalty"] > 0 else 0,
+		"%d empty lot%s: -1 point each." % [r["unused"].size(), "" if r["unused"].size() == 1 else "s"] if r["unused_penalty"] > 0 else "No empty lots.")
 	for u in r["unused"]:
 		mat.views[u].highlight = UiKit.HEAT
 		mat.views[u].pop(0.18)

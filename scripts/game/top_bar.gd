@@ -44,8 +44,8 @@ func _build_logo() -> Control:
 	var logo := HBoxContainer.new()
 	logo.add_theme_constant_override("separation", 10)
 	logo.add_child(UiKit.icon("res://assets/tiles/home_small_worker.svg", 40))
-	logo.add_child(UiKit.label("Egkomi City", 30, UiKit.LIMESTONE, "display_bold"))
-	logo.custom_minimum_size.x = 210
+	logo.add_child(UiKit.label("Redesign the City", 26, UiKit.LIMESTONE, "display_bold"))
+	logo.custom_minimum_size.x = 270
 	return logo
 
 
@@ -59,7 +59,6 @@ func _build_round_tracker(tooltip, rounds: int) -> Control:
 	var gap := Control.new()
 	gap.custom_minimum_size.x = 10
 	rt.add_child(gap)
-	rt.add_child(UiKit.label("Hidden", 15, UiKit.MUTED, "body_bold"))
 	_circumstance_strip = CircumstanceStrip.new(tooltip, rounds)
 	_circumstance_strip.card_pressed.connect(circumstance_pressed.emit)
 	rt.add_child(_circumstance_strip)

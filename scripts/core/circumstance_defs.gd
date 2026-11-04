@@ -3,6 +3,7 @@ extends RefCounted
 ## of each round; a game draws 8 of the 32.
 
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
 ## Every card hits everyone and changes only happiness, points or gold, never tiles.
 ## Happiness effects stay on until the end of the game; gold effects happen once, when revealed.
@@ -23,18 +24,33 @@ const BUSINESS_GOLD_PER_COMMERCIAL := 2
 const TAX_REFUND := 8
 ## Smog alert: with pollution above this level every citizen without a park loses 1 happiness.
 const SMOG_LEVEL := 5
-## Farmers' market: a market or supermarket this many roads away or closer pleases a citizen.
-const MARKET_REACH := 2
+## Farmers' market: a market or supermarket this many road squares away or closer pleases a citizen
+## (two of the old full-size roads).
+const MARKET_REACH := 2 * Grid.BLOCK
 ## Road subsidy pays for this many road tiles at most, pipe repairs for this many homes.
 const ROAD_SUBSIDY_CAP := 8
 const PIPE_REPAIR_CAP := 6
 
-const IDS := ["heatwave", "flash_flood", "dust_storm", "nice_weather", "budget_cut", "grant",
-	"road_works", "new_attractor", "population_growth",
-	"exam_season", "flu_wave", "supply_shortage", "back_to_school", "parking_shortage",
-	"traffic_jam", "drought", "tourist_season", "health_campaign", "open_day",
-	"business_boom", "tax_refund", "bike_week", "street_festival", "remote_work",
-	"autumn_rain", "smog_alert", "cold_snap", "farmers_market", "science_fair", "road_subsidy", "bus_strike", "pipe_repairs"]
+const IDS := ["heatwave", "flash_flood", "dust_storm", "nice_weather", "drought", "autumn_rain", "cold_snap", "smog_alert",
+	"road_works", "traffic_jam", "parking_shortage", "bus_strike", "bike_week", "street_festival",
+	"flu_wave", "exam_season", "back_to_school",
+	"step_free_streets", "short_walks", "playground_day", "tree_lined_walks", "night_noise", "neighbourhood_spirit", "park_stroll"]
+
+## The cards added in the cards rework (3.0), for the print sheet of new cards only.
+const NEW_IDS := ["step_free_streets", "short_walks", "playground_day", "tree_lined_walks", "night_noise", "neighbourhood_spirit", "park_stroll"]
+
+## The objectives each card answers (see UiKit.OBJECTIVES): O1 circulation and everyday life, O2 how spaces could be
+## improved, O3 where greenery could improve pedestrian routes, O4 how movement, vegetation, accessibility and spaces
+## shape everyday life in Egkomi. Cards that left the deck keep their rules in this file but are not listed here.
+const OBJECTIVES := {
+	"heatwave": ["O1", "O3"], "flash_flood": ["O1", "O3"], "dust_storm": ["O3", "O4"], "nice_weather": ["O1", "O3"],
+	"drought": ["O3"], "autumn_rain": ["O3"], "cold_snap": ["O3", "O4"], "smog_alert": ["O3", "O4"],
+	"road_works": ["O1", "O2"], "traffic_jam": ["O1"], "parking_shortage": ["O1", "O4"], "bus_strike": ["O1"],
+	"bike_week": ["O1"], "street_festival": ["O1", "O3"], "flu_wave": ["O4"], "exam_season": ["O4"],
+	"back_to_school": ["O4"], "step_free_streets": ["O1", "O2", "O4"], "short_walks": ["O1", "O2"],
+	"playground_day": ["O3", "O4"], "tree_lined_walks": ["O1", "O3"], "night_noise": ["O4"],
+	"neighbourhood_spirit": ["O2", "O4"], "park_stroll": ["O1", "O3", "O4"],
+}
 
 ## Which complaint a card that hurts a citizen counts towards (see Scoring._member).
 const NEED_CARDS := ["exam_season", "flu_wave", "supply_shortage", "back_to_school", "parking_shortage"]
@@ -237,11 +253,58 @@ const DEFS := {
 		"rule": "Every planner pays 1 gold for each home on their mat (up to 6).",
 		"tip": "Costs planners with many homes the most.",
 	},
+	"step_free_streets": {
+		"title": "Step-free streets", "family": FAMILY_CITY, "art": "circumstance_health_campaign", "badge": "+1", "key": "gain 1 happiness", "icon": "citizen", "tint": "#2FA3A0",
+		"story": "Ramps and dropped kerbs everywhere.",
+		"rule": "Children, older residents and residents with a disability with a route of 4 squares or less gain 1 happiness.",
+		"tip": "Rewards services close to the homes that need them most.",
+	},
+	"short_walks": {
+		"title": "Short walks", "family": FAMILY_CITY, "art": "circumstance_remote_work", "badge": "+1", "key": "gain 1 happiness", "icon": "citizen", "tint": "#3A8DDE",
+		"story": "The 15-minute city, at last.",
+		"rule": "Workers, students and international residents with a route of 4 squares or less gain 1 happiness.",
+		"tip": "Rewards compact neighbourhoods.",
+	},
+	"playground_day": {
+		"title": "Playground day", "family": FAMILY_CITY, "art": "circumstance_open_day", "badge": "+1", "key": "gain 1 happiness", "icon": "citizen", "tint": "#E2569C",
+		"story": "The swings are full and the park is loud.",
+		"rule": "Children with a park within reach gain 1 happiness.",
+		"tip": "Rewards parks near children's homes.",
+	},
+	"tree_lined_walks": {
+		"title": "Tree-lined walks", "family": FAMILY_CITY, "art": "circumstance_farmers_market", "badge": "+1", "key": "gain 1 happiness", "icon": "citizen", "tint": "#5E9B3A",
+		"story": "Shade on every pavement from the square to the school gate.",
+		"rule": "Citizens with two green spaces near their home gain 1 happiness.",
+		"tip": "Rewards trees and parks beside homes.",
+	},
+	"night_noise": {
+		"title": "Night noise", "family": FAMILY_CITY, "art": "circumstance_tourist_season", "badge": "-1", "key": "lose 1 happiness", "icon": "citizen", "tint": "#6B6F9A",
+		"story": "Music and engines until three in the morning.",
+		"rule": "Citizens with a building they dislike right next door lose 1 happiness.",
+		"tip": "Punishes homes beside the wrong neighbour.",
+	},
+	"neighbourhood_spirit": {
+		"title": "Neighbourhood spirit", "family": FAMILY_CITY, "art": "circumstance_population_growth", "badge": "+1", "key": "gain 1 happiness", "icon": "citizen", "tint": "#D8682B",
+		"story": "Neighbours greet each other by name.",
+		"rule": "Citizens who can reach something they like gain 1 happiness.",
+		"tip": "Rewards homes with a favourite place nearby.",
+	},
+	"park_stroll": {
+		"title": "Park stroll", "family": FAMILY_CITY, "art": "circumstance_new_attractor", "badge": "+1", "key": "gain 1 happiness", "icon": "citizen", "tint": "#3F9A4A",
+		"story": "A walk through the park on the way home.",
+		"rule": "Citizens with a park nearby and a pedestrian street on their route gain 1 happiness.",
+		"tip": "Rewards green, car-free routes.",
+	},
 }
 
 
 static func info(id: String) -> Dictionary:
 	return DEFS[id]
+
+
+## The objectives the card answers, as ids "O1" to "O4".
+static func objectives(id: String) -> Array:
+	return OBJECTIVES[id]
 
 
 static func title(id: String) -> String:
@@ -283,14 +346,14 @@ static func gold_change(id: String, cells: Array) -> int:
 			return -BUDGET_CUT
 		"grant":
 			var green := 0
-			for t in cells:
-				if t != null and (t["kind"] == TileDefs.Kind.PARK or TileDefs.is_tree_like(t)):
+			for t in Grid.tiles(cells):
+				if (t["kind"] == TileDefs.Kind.PARK or TileDefs.is_tree_like(t)):
 					green += 1
 			return GRANT_BASE + GRANT_PER_GREEN * green
 		"business_boom":
 			var shops := 0
-			for t in cells:
-				if t != null and t["kind"] == TileDefs.Kind.COMMERCIAL:
+			for t in Grid.tiles(cells):
+				if t["kind"] == TileDefs.Kind.COMMERCIAL:
 					shops += 1
 			return BUSINESS_GOLD_PER_COMMERCIAL * shops
 		"tax_refund":
@@ -299,8 +362,8 @@ static func gold_change(id: String, cells: Array) -> int:
 			return mini(_count(cells, [TileDefs.Kind.ROAD]), ROAD_SUBSIDY_CAP)
 		"pipe_repairs":
 			var homes := 0
-			for tile in cells:
-				if tile != null and TileDefs.is_home(tile["kind"]):
+			for tile in Grid.tiles(cells):
+				if TileDefs.is_home(tile["kind"]):
 					homes += 1
 			return -mini(homes, PIPE_REPAIR_CAP)
 	return 0
@@ -347,7 +410,7 @@ static func member_effect(id: String, m: Dictionary) -> int:
 			if not needs.has("groceries"):
 				return 0
 			var closest := mini(nearest.get(TileDefs.Kind.SUPERMARKET, 99), nearest.get(TileDefs.Kind.MARKET, 99))
-			return -1 if closest > 2 else 0
+			return -1 if closest > MARKET_REACH else 0
 		"back_to_school":
 			return -1 if role == "child" and needs.get("school", true) == false else 0
 		"parking_shortage":
@@ -377,15 +440,37 @@ static func member_effect(id: String, m: Dictionary) -> int:
 			return 1 if nearest_shop <= MARKET_REACH else 0
 		"bus_strike":
 			return -1 if _has_long_walk(routes, long_route) and not nearest.has(TileDefs.Kind.PARKING) else 0
+		"step_free_streets":
+			return 1 if role in ["child", "older", "access"] and _closest_route(routes) <= MARKET_REACH else 0
+		"short_walks":
+			return 1 if role in ["worker", "student", "expat"] and _closest_route(routes) <= MARKET_REACH else 0
+		"playground_day":
+			return 1 if role == "child" and m["has_park"] else 0
+		"tree_lined_walks":
+			return 1 if m["green"] >= 2 else 0
+		"night_noise":
+			return -1 if m["dislike"] else 0
+		"neighbourhood_spirit":
+			return 1 if m["like"] else 0
+		"park_stroll":
+			return 1 if m["has_park"] and m["pedestrian_route"] else 0
 	return 0
 
 
 static func _count(cells: Array, kinds: Array) -> int:
 	var n := 0
-	for tile in cells:
-		if tile != null and tile["kind"] in kinds:
+	for tile in Grid.tiles(cells):
+		if tile["kind"] in kinds:
 			n += 1
 	return n
+
+
+## The shortest route to anything, in road squares (99 when nothing can be reached).
+static func _closest_route(routes: Dictionary) -> int:
+	var closest := 99
+	for r in routes.values():
+		closest = mini(closest, r["length"])
+	return closest
 
 
 static func _has_long_walk(routes: Dictionary, long_route: int) -> bool:

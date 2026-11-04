@@ -10,9 +10,9 @@ config_version=5
 
 [application]
 
-config/name="Egkomi City"
+config/name="Redesign the City"
 config/description="A local 2-4 player city-building board game about circulation, greenery and accessibility in Egkomi."
-config/version="1.0.0"
+config/version="3.0.0"
 run/main_scene="res://scenes/title.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 boot_splash/bg_color=Color(0.0588235, 0.164706, 0.239216, 1)

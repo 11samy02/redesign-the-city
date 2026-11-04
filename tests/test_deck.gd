@@ -30,7 +30,8 @@ func _finish_round(gs: GameState) -> void:
 					slot = i
 			if slot < 0:
 				return
-			gs.buy_and_place(slot, p.cells.find(null))
+			var spots := Grid.valid_anchors(p.cells, TileDefs.footprint(gs.shop[slot]["tile"]))
+			gs.buy_and_place(slot, spots[0])
 		gs.end_turn()
 
 

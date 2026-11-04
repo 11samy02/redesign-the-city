@@ -26,9 +26,9 @@ var _gauge: Widgets.PollutionGauge
 
 func _init(tooltip: Tooltip) -> void:
 	_tooltip = tooltip
-	add_theme_stylebox_override("panel", UiKit.box(UiKit.PANEL, 18, 1, UiKit.LINE, 10))
+	add_theme_stylebox_override("panel", UiKit.box(UiKit.PANEL, 18, 1, UiKit.LINE, 8))
 	var bv := VBoxContainer.new()
-	bv.add_theme_constant_override("separation", 8)
+	bv.add_theme_constant_override("separation", 6)
 	add_child(bv)
 	bv.add_child(_build_top_row())
 	bv.add_child(_build_stats())
@@ -41,7 +41,7 @@ func show_player(p, result: Dictionary) -> void:
 	_avatar.letter = p.name.substr(0, 1).to_upper()
 	_name_label.text = p.name
 	_name_label.add_theme_color_override("font_color", col.lightened(0.25))
-	_sub_label.text = ("%s bot, building their city" % Bot.level_name(p.bot_level)) if p.is_bot() else "is building their city"
+	_sub_label.text = ("%s bot" % Bot.level_name(p.bot_level)) if p.is_bot() else "Building now"
 
 	var poll: int = result["pollution"]
 	var pen: int = result["pollution_penalty"]
@@ -83,16 +83,16 @@ func gauge_center() -> Vector2:
 
 func _build_top_row() -> Control:
 	var top := HBoxContainer.new()
-	top.add_theme_constant_override("separation", 14)
-	_avatar = Widgets.Avatar.new(54)
+	top.add_theme_constant_override("separation", 10)
+	_avatar = Widgets.Avatar.new(44)
 	top.add_child(_avatar)
 	var names := VBoxContainer.new()
 	names.add_theme_constant_override("separation", -2)
-	_name_label = UiKit.label("", 30, UiKit.LIMESTONE, "display_bold")
-	_sub_label = UiKit.label("", 15, UiKit.MUTED)
+	_name_label = UiKit.label("", 24, UiKit.LIMESTONE, "display_bold")
+	_sub_label = UiKit.label("", 13, UiKit.MUTED)
 	for l in [_name_label, _sub_label]:
 		l.clip_text = true
-		l.custom_minimum_size.x = 150
+		l.custom_minimum_size.x = 80
 	names.add_child(_name_label)
 	names.add_child(_sub_label)
 	top.add_child(names)
@@ -104,20 +104,22 @@ func _build_top_row() -> Control:
 func _build_money() -> Control:
 	var money := HBoxContainer.new()
 	money.add_theme_constant_override("separation", 6)
-	_money_icon = UiKit.icon(COIN, 44)
+	_money_icon = UiKit.icon(COIN, 30)
 	money.add_child(_money_icon)
-	_money_label = UiKit.label(str(GameState.START_MONEY), 40, UiKit.GOLD, "display_bold")
+	_money_label = UiKit.label(str(GameState.START_MONEY), 32, UiKit.GOLD, "display_bold")
 	money.add_child(_money_label)
 	money.mouse_filter = Control.MOUSE_FILTER_PASS
-	money.custom_minimum_size.x = 140
+	money.custom_minimum_size.x = 92
 	money.mouse_entered.connect(func(): _tooltip.show_text("Gold", ["Pay for tiles from the construction site.", "A loan adds %d gold but costs points at the end, and more with every further loan." % GameState.LOAN_AMOUNT], money.get_global_rect(), COIN))
 	money.mouse_exited.connect(_tooltip.hide_tip)
 	return money
 
 
 func _build_stats() -> Control:
-	var stats := HBoxContainer.new()
-	stats.add_theme_constant_override("separation", 6)
+	var stats := GridContainer.new()
+	stats.columns = 2
+	stats.add_theme_constant_override("h_separation", 6)
+	stats.add_theme_constant_override("v_separation", 4)
 	stats.add_child(_stat("pollution", "Pollution", "res://assets/ui/pollution.svg", [
 		"Starts at %d. Each park lowers it by 3, each trees tile by 1." % Scoring.START_POLLUTION,
 		"Below 8: no effect. 8 to 12: -1 happiness. 13 and up: -2 happiness for every citizen."]))
@@ -136,24 +138,24 @@ func _build_stats() -> Control:
 func _stat(key: String, caption: String, icon_path: String, help: Array) -> Control:
 	var pc := PanelContainer.new()
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	pc.add_theme_stylebox_override("panel", UiKit.box(UiKit.PANEL_HI, 12, 0, Color.TRANSPARENT, 8))
+	pc.add_theme_stylebox_override("panel", UiKit.box(UiKit.PANEL_HI, 12, 0, Color.TRANSPARENT, 7))
 	pc.size_flags_stretch_ratio = 1.0
 	pc.mouse_filter = Control.MOUSE_FILTER_PASS
 	var h := HBoxContainer.new()
 	var v := VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_theme_constant_override("separation", 0)
-	var cap := UiKit.label(caption, 13, UiKit.MUTED)
-	var val := UiKit.label("", 18, UiKit.LIMESTONE, "display_bold")
+	var cap := UiKit.label(caption, 12, UiKit.MUTED)
+	var val := UiKit.label("", 16, UiKit.LIMESTONE, "display_bold")
 	for l in [cap, val]:
 		l.clip_text = true
-		l.custom_minimum_size.x = 90
+		l.custom_minimum_size.x = 84
 	v.add_child(cap)
 	v.add_child(val)
 	_stat_notes[key] = cap
 	if key == "pollution":
 		_gauge = Widgets.PollutionGauge.new()
-		_gauge.custom_minimum_size = Vector2(90, 6)
+		_gauge.custom_minimum_size = Vector2(84, 5)
 		v.add_child(_gauge)
 	h.add_child(v)
 	pc.add_child(h)

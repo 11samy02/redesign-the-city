@@ -1,8 +1,9 @@
 extends RefCounted
-## Keyboard cursor over the construction site's stacks and the player mat (7x7).
+## Keyboard cursor over the construction site's stacks and the player mat (14x14 squares).
 ## Pure navigation state: the screen draws the focus and acts on Enter.
 
 const Scoring = preload("res://scripts/core/scoring.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
 const MAT_N := Scoring.SIZE
 
@@ -13,6 +14,8 @@ var area := "shop"
 ## Stack index under the cursor.
 var shop := 0
 var mat := 0
+## The mat being navigated, so the cursor can step over the other squares of a 2:2 tile (set by the screen).
+var cells: Array = []
 ## The shop's visual rows: arrays of stack indexes, top to bottom (see ShopView.rows).
 var shop_rows: Array = []
 
@@ -64,4 +67,13 @@ func _step_mat(d: Vector2i) -> void:
 		var r := roundi(float(row) / (MAT_N - 1.0) * (shop_rows.size() - 1))
 		shop = shop_rows[r][-1]
 		return
-	mat = clampi(row + d.y, 0, MAT_N - 1) * MAT_N + clampi(col + d.x, 0, MAT_N - 1)
+	var from_tile := Grid.anchor_of(cells, mat) if cells.size() == MAT_N * MAT_N else -1
+	var x := col
+	var y := row
+	# one step, or more while the squares are still the same 2:2 tile
+	for k in 2:
+		x = clampi(x + d.x, 0, MAT_N - 1)
+		y = clampi(y + d.y, 0, MAT_N - 1)
+		if from_tile < 0 or Grid.anchor_of(cells, y * MAT_N + x) != from_tile:
+			break
+	mat = y * MAT_N + x

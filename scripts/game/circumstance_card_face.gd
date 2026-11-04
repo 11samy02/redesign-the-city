@@ -100,7 +100,7 @@ static func front_blank(kind: String) -> Control:
 			spec = spec_of_circumstance("heatwave")
 			spec["tint"] = Color("#5B9BD5")
 		_:
-			spec = spec_of_circumstance("budget_cut")
+			spec = spec_of_circumstance("short_walks")
 			spec["tint"] = Color("#C9A25B")
 	for k in ["title", "story", "rule", "key", "badge", "number_text", "tab_text"]:
 		spec[k] = ""
@@ -411,7 +411,7 @@ static func _footer(spec: Dictionary) -> Control:
 		only.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(only)
 		return row
-	var left := _engraved("EGKOMI CITY", HORIZONTAL_ALIGNMENT_LEFT)
+	var left := _engraved("REDESIGN THE CITY", HORIZONTAL_ALIGNMENT_LEFT)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(left)
 	row.add_child(UiKit.icon("res://assets/ui/sun.svg", 20))

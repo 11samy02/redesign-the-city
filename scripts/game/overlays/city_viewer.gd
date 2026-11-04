@@ -35,7 +35,7 @@ func _ready() -> void:
 	card.add_child(h)
 	_mat = MatView.new()
 	# the whole mat has to fit the screen height, with room for the card's padding and border
-	var gap := 8
+	var gap := 2
 	var cell := mini(118, int((get_viewport_rect().size.y - 140.0 - gap * (Scoring.SIZE - 1)) / Scoring.SIZE))
 	_mat.setup(cell, gap, TileView.Mode.MAT)
 	_mat.refresh(_player.cells, _result)

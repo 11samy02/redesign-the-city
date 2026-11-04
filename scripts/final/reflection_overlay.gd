@@ -3,6 +3,7 @@ extends Control
 ## complaints. One planner at a time, on their own city; computer planners pick on their own.
 
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
+const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const Widgets = preload("res://scripts/ui/widgets.gd")
 const Describe = preload("res://scripts/ui/describe.gd")
 const TileView = preload("res://scripts/ui/tile_view.gd")
@@ -222,7 +223,7 @@ func _show_stage(i: int) -> void:
 ## The planner's city card: avatar and name, the mat with tile tooltips and a hint line.
 func _build_city_panel(p, r: Dictionary) -> Dictionary:
 	var col := UiKit.player_color(p.color_index)
-	var cell := clampf((get_viewport_rect().size.y - 340.0) / 7.0 - 8.0, 44.0, 90.0)
+	var cell := clampf((get_viewport_rect().size.y - 340.0) / 14.0 - 4.0, 22.0, 45.0)
 	var pc := PanelContainer.new()
 	pc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var psb := UiKit.box(UiKit.PANEL, 24, 0, Color.TRANSPARENT, 18)
@@ -245,7 +246,7 @@ func _build_city_panel(p, r: Dictionary) -> Dictionary:
 		ph.add_child(UiKit.chip("%s bot" % Bot.level_name(p.bot_level), UiKit.PANEL_HI, UiKit.MUTED, 12))
 	lv.add_child(ph)
 	var mv := MatView.new()
-	mv.setup(cell, 5, TileView.Mode.MAT)
+	mv.setup(cell, 2, TileView.Mode.MAT)
 	mv.refresh(p.cells, r)
 	mv.cell_hovered.connect(func(c, inside):
 		if inside and p.cells[c] != null:
@@ -492,12 +493,13 @@ func _reveal_city(r: Dictionary, chosen: String, n: int, ui: Dictionary) -> void
 
 ## Small round badge in a tile's corner showing which kind of change would help it.
 func _add_mark(mv: MatView, cell: int, kind: String, ring: Color, order: int) -> void:
-	var px := mv.cell * 0.3
+	var side: float = mv.span(TileDefs.footprint(mv.cells[cell]) if mv.cells[cell] != null else 1)
+	var px := mv.cell * 0.3 + (4.0 if side > mv.cell else 0.0)
 	var mark := PanelContainer.new()
 	mark.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.INK_DEEP, 0.92), 99, 2, ring, 4))
 	mark.add_child(UiKit.icon(Describe.COMPLAINTS[kind]["icon"], px))
 	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mark.position = mv.cell_pos(cell) + Vector2(mv.cell - px - 16, mv.cell - px - 16)
+	mark.position = mv.cell_pos(cell) + Vector2(side - px - 16, side - px - 16)
 	mv.add_child(mark)
 	mark.pivot_offset = mark.get_combined_minimum_size() / 2
 	mark.scale = Vector2.ZERO

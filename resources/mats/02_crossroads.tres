@@ -1,0 +1,98 @@
+[gd_resource type="Resource" script_class="PlayerMatPreset" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/player_mat_preset.gd" id="1_pgkss"]
+[ext_resource type="Script" path="res://scripts/resources/preset_tile.gd" id="2_srqth"]
+
+[sub_resource type="Resource" id="Resource_mu2va"]
+script = ExtResource("2_srqth")
+x = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_urr4k"]
+script = ExtResource("2_srqth")
+x = 6
+y = 2
+large = true
+
+[sub_resource type="Resource" id="Resource_mfyrt"]
+script = ExtResource("2_srqth")
+x = 6
+y = 4
+large = true
+
+[sub_resource type="Resource" id="Resource_n36u3"]
+script = ExtResource("2_srqth")
+x = 6
+y = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_oqhs2"]
+script = ExtResource("2_srqth")
+x = 6
+y = 8
+large = true
+
+[sub_resource type="Resource" id="Resource_wkki7"]
+script = ExtResource("2_srqth")
+x = 6
+y = 10
+large = true
+
+[sub_resource type="Resource" id="Resource_xxaw3"]
+script = ExtResource("2_srqth")
+x = 6
+y = 12
+large = true
+
+[sub_resource type="Resource" id="Resource_qoxff"]
+script = ExtResource("2_srqth")
+y = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_c6bgr"]
+script = ExtResource("2_srqth")
+x = 2
+y = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_rctq4"]
+script = ExtResource("2_srqth")
+x = 4
+y = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_6n67c"]
+script = ExtResource("2_srqth")
+x = 8
+y = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_arxyn"]
+script = ExtResource("2_srqth")
+x = 10
+y = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_bjn1d"]
+script = ExtResource("2_srqth")
+x = 12
+y = 6
+large = true
+
+[sub_resource type="Resource" id="Resource_n44vw"]
+script = ExtResource("2_srqth")
+kind = 19
+x = 1
+y = 1
+
+[sub_resource type="Resource" id="Resource_5onrs"]
+script = ExtResource("2_srqth")
+kind = 17
+x = 10
+y = 10
+
+[resource]
+script = ExtResource("1_pgkss")
+title = "Crossroads"
+description = "Two wide streets cross in the middle. A park and a school wait in the corners."
+tiles = Array[ExtResource("2_srqth")]([SubResource("Resource_mu2va"), SubResource("Resource_urr4k"), SubResource("Resource_mfyrt"), SubResource("Resource_n36u3"), SubResource("Resource_oqhs2"), SubResource("Resource_wkki7"), SubResource("Resource_xxaw3"), SubResource("Resource_qoxff"), SubResource("Resource_c6bgr"), SubResource("Resource_rctq4"), SubResource("Resource_6n67c"), SubResource("Resource_arxyn"), SubResource("Resource_bjn1d"), SubResource("Resource_n44vw"), SubResource("Resource_5onrs")])

@@ -6,6 +6,8 @@ const GameState = preload("res://scripts/core/game_state.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const CardDefs = preload("res://scripts/core/card_defs.gd")
 const CardEffects = preload("res://scripts/core/card_effects.gd")
+const Legacy = preload("res://tests/legacy_cards.gd")
+const CircumstanceDefs = preload("res://scripts/core/circumstance_defs.gd")
 
 const K := TileDefs.Kind
 const EMPTY := "......."
@@ -18,31 +20,39 @@ func _game(n := 2, seed_value := 3) -> GameState:
 	return gs
 
 
+## Starts card `id` for the current planner (a retired card is put back first, see legacy_cards.gd).
+func _begin(gs: GameState, id: String, coin := "") -> void:
+	Legacy.ensure(id)
+	gs.begin_card(id, coin)
+
+
 func _fx(id: String) -> Dictionary:
+	Legacy.ensure(id)
 	return CardDefs.info(id)["fx"]
 
 
 ## Plays card `id` for player `me` (and the first option for a choice card unless `choice` is given).
 func _play(gs: GameState, id: String, me := 0, choice := 0) -> Dictionary:
-	gs.begin_card(id)
+	Legacy.ensure(id)
+	_begin(gs, id)
 	return gs.resolve_turn_card(choice if gs.card_needs_choice() else -1)
 
 
 func _count(cells: Array, kind: int) -> int:
 	var n := 0
-	for t in cells:
-		if t != null and t["kind"] == kind:
+	for t in Grid.tiles(cells):
+		if t["kind"] == kind:
 			n += 1
 	return n
 
 
 # ---------------------------------------------------------------- the data
 
-func test_each_deck_has_sixty_four_unique_cards() -> void:
-	eq(CardDefs.DECK_SIZE, 64, "deck size")
+func test_each_deck_has_thirty_two_unique_cards() -> void:
+	eq(CardDefs.DECK_SIZE, 32, "deck size")
 	for type in CardDefs.TYPES:
 		var ids := CardDefs.ids(type)
-		eq(ids.size(), 64, "%s cards" % type)
+		eq(ids.size(), 32, "%s cards" % type)
 		var seen := {}
 		for id in ids:
 			check(not seen.has(id), "%s is unique" % id)
@@ -73,18 +83,95 @@ func test_the_events_are_good_and_the_penalties_are_bad() -> void:
 		check(not CardDefs.info(id)["badge"].begins_with("+"), "%s badge is not a gain" % id)
 
 
+# ---------------------------------------------------------------- the cards rework
+
+func test_every_card_answers_at_least_one_objective() -> void:
+	var objectives := ["O1", "O2", "O3", "O4"]
+	for id in CardDefs.ids(CardDefs.EVENT) + CardDefs.ids(CardDefs.PENALTY):
+		var o: Array = CardDefs.objectives(id)
+		check(not o.is_empty(), "%s answers an objective" % id)
+		for x in o:
+			check(x in objectives, "%s: %s is one of the game's objectives" % [id, x])
+	for id in CircumstanceDefs.IDS:
+		check(not CircumstanceDefs.objectives(id).is_empty(), "%s answers an objective" % id)
+
+
+func test_the_cards_taken_out_of_the_decks_are_gone() -> void:
+	var gone := ["government_funding", "regional_grant", "lottery_win", "bank_bonus", "solidarity_fund", "tourist_tax", "generous_donor",
+		"shopkeepers_guild", "market_day", "campus_buzz", "debt_relief", "road_crew", "cafe_startup", "luxury_housing", "civic_pride",
+		"solar_roofs", "mayors_reward", "planners_pick", "festival_of_lights", "food_fair", "sponsor_deal", "administrative_fee", "tax_audit",
+		"loan_inspection", "noise_complaints", "pickpockets", "smog_scandal"]
+	var in_decks := CardDefs.ids(CardDefs.EVENT) + CardDefs.ids(CardDefs.PENALTY)
+	for id in gone:
+		check(not (id in in_decks), "%s is no longer in a deck" % id)
+
+
+func test_new_cards_reuse_the_picture_of_a_card_that_left() -> void:
+	for id in CardDefs.ART_FROM:
+		check(CardDefs.has_card(id), "%s is a card in the game" % id)
+		check(FileAccess.file_exists(CardDefs.art_path(id)), "%s has its picture" % id)
+		check(not CardDefs.ART_FROM[id] in CardDefs.ids(CardDefs.EVENT), "%s borrows from a card that left" % id)
+
+
+func test_the_walking_cards_look_at_the_citizens() -> void:
+	var gs := _game()
+	var me := gs.current_index()
+	# an older resident with a 3-road walk and no shade
+	gs.players[me].cells = mat(["sRRRS..", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY], {0: 1})
+	_play(gs, "hot_pavements")
+	eq(gs.players[me].card_points, -1, "one citizen with a hot walk loses a point")
+	var gs2 := _game()
+	var me2 := gs2.current_index()
+	gs2.players[me2].cells = mat(["sRR....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
+	_play(gs2, "missing_links")
+	eq(gs2.players[me2].card_points, -1, "a worker who reaches nothing loses a point")
+	var gs3 := _game()
+	var me3 := gs3.current_index()
+	gs3.players[me3].cells = mat(["uRU....", ".RL....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
+	_play(gs3, "nobody_left_out")
+	eq(gs3.players[me3].card_points, 2, "every need within reach earns 2 points")
+	_play(gs3, "cool_walkways")
+	eq(gs3.players[me3].card_points, 4, "nobody has a hot walk")
+
+
+func test_trees_and_parks_cards() -> void:
+	var gs := _game()
+	var me := gs.current_index()
+	gs.players[me].cells = mat(NONE)
+	_play(gs, "bare_pavements")
+	eq(gs.players[me].card_points, -2, "no trees, no points")
+	var gs2 := _game()
+	var me2 := gs2.current_index()
+	gs2.players[me2].cells = mat(["T......", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
+	_play(gs2, "bare_pavements")
+	eq(gs2.players[me2].card_points, 0, "trees protect")
+	var gs3 := _game()
+	_play(gs3, "pocket_parks")
+	var park := TileDefs.make(K.PARK)
+	eq(gs3.price_of(park), TileDefs.tile_cost(park) - 2, "parks cost 2 less")
+	eq(gs3.price_of(TileDefs.make(K.ROAD)), 1, "and roads cost the same")
+	var gs4 := _game()
+	_play(gs4, "fresh_asphalt")
+	eq(gs4.price_of(TileDefs.make(K.ROAD)), 0, "roads are free")
+	var gs5 := _game()
+	var me5 := gs5.current_index()
+	_play(gs5, "pedestrian_day")
+	eq(gs5.players[me5].bonus_tiles.size(), 2, "a street and trees")
+	eq(gs5.players[me5].bonus_tiles[0]["variant"], TileDefs.STREET_PEDESTRIAN, "the street is a pedestrian street")
+
+
 # ---------------------------------------------------------------- gold
 
 func test_gold_for_everyone_and_for_you() -> void:
 	var gs := _game(3)
 	_play(gs, "government_funding")
 	for p in gs.players:
-		eq(p.money, 129, "everyone +4")
+		eq(p.money, 104, "everyone +4")
 	_play(gs, "regional_grant")
-	eq(gs.players[gs.current_index()].money, 129 + 3 + 3, "the drawer gets 3 more")
-	eq(gs.players[(gs.current_index() + 1) % 3].money, 132, "others get 3")
+	eq(gs.players[gs.current_index()].money, 104 + 3 + 3, "the drawer gets 3 more")
+	eq(gs.players[(gs.current_index() + 1) % 3].money, 107, "others get 3")
 	_play(gs, "lottery_win")
-	eq(gs.players[gs.current_index()].money, 129 + 6 + 8, "lottery")
+	eq(gs.players[gs.current_index()].money, 104 + 6 + 8, "lottery")
 
 
 func test_losses_never_take_gold_below_zero() -> void:
@@ -125,11 +212,11 @@ func test_others_pay_you() -> void:
 	var gs := _game(3)
 	var me := gs.current_index()
 	_play(gs, "tourist_tax")
-	eq(gs.players[me].money, 129, "two others pay 2")
+	eq(gs.players[me].money, 104, "two others pay 2")
 	gs.players[(me + 1) % 3].money = 200
 	gs.players[me].money = 100
 	_play(gs, "generous_donor")
-	eq(gs.players[me].money, 130, "the richest pays 5")
+	eq(gs.players[me].money, 105, "the richest pays 5")
 	eq(gs.players[(me + 1) % 3].money, 195, "and it is taken from them")
 	gs.players[me].money = 500
 	_play(gs, "generous_donor")
@@ -140,7 +227,7 @@ func test_pay_each_other_player_and_transfer() -> void:
 	var gs := _game(3)
 	var me := gs.current_index()
 	_play(gs, "road_toll_dispute", me, 0)
-	eq(gs.players[me].money, 121, "paid 2 to each of 2 players")
+	eq(gs.players[me].money, 96, "paid 2 to each of 2 players")
 	var gs2 := _game(3)
 	gs2.players[0].money = 90
 	gs2.players[1].money = 150
@@ -154,11 +241,11 @@ func test_gold_for_what_is_on_your_mat() -> void:
 	var me := gs.current_index()
 	gs.players[me].cells = mat(["PPTTTTT", "TTTT...", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	_play(gs, "green_city_award")
-	eq(gs.players[me].money, 135, "2 gold per green tile, up to 5")
+	eq(gs.players[me].money, 110, "2 gold per green tile, up to 5")
 	gs.players[me].money = 100
 	gs.players[me].cells = mat(["RRR....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	_play(gs, "construction_delays")
-	eq(gs.players[me].money, 124, "1 gold per 2 roads")
+	eq(gs.players[me].money, 99, "1 gold per 2 roads")
 
 
 func test_conditions_for_gold_and_points() -> void:
@@ -166,13 +253,13 @@ func test_conditions_for_gold_and_points() -> void:
 	var me := gs.current_index()
 	gs.players[me].cells = mat(["sRL....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	_play(gs, "improved_circulation")
-	eq(gs.players[me].money, 130, "connected homes pay 5")
+	eq(gs.players[me].money, 105, "connected homes pay 5")
 	gs.players[me].money = 100
 	gs.players[me].cells = mat(["s..L...", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	_play(gs, "improved_circulation")
 	eq(gs.players[me].money, 100, "an unconnected home pays nothing")
 	_play(gs, "clean_record")
-	eq(gs.players[me].money, 130, "no loans")
+	eq(gs.players[me].money, 105, "no loans")
 	gs.players[me].loans = 1
 	gs.players[me].money = 100
 	_play(gs, "clean_record")
@@ -251,13 +338,13 @@ func test_a_planner_who_picks_chooses_which_tiles_a_penalty_takes() -> void:
 	_play(gs, "flooded_streets")
 	eq(_count(gs.players[me].cells, K.ROAD), 4, "nothing is lost before the planner chooses")
 	eq(gs.pending_loss(), {"kinds": [K.ROAD], "n": 2}, "two roads to choose")
-	eq(gs.loss_cells(), [0, 1, 2, 3] as Array[int], "only roads can be picked")
-	eq(gs.lose_tile_at(4), {}, "trees are not a valid pick")
-	check(not gs.lose_tile_at(1).is_empty(), "the first road goes")
-	eq(gs.players[me].cells[1], null, "the picked lot is empty")
+	eq(gs.loss_cells(), [at(0), at(1), at(2), at(3)] as Array[int], "only roads can be picked")
+	eq(gs.lose_tile_at(at(4)), {}, "trees are not a valid pick")
+	check(not gs.lose_tile_at(at(1)).is_empty(), "the first road goes")
+	eq(gs.players[me].cells[at(1)], null, "the picked lot is empty")
 	eq(_count(gs.players[me].cells, K.ROAD), 3, "only the picked road left")
 	check(not gs.pending_losses.is_empty(), "one more to choose")
-	check(not gs.lose_tile_at(3).is_empty(), "the second road goes")
+	check(not gs.lose_tile_at(at(3)).is_empty(), "the second road goes")
 	check(gs.pending_losses.is_empty(), "the penalty is settled")
 	eq(_count(gs.players[me].cells, K.ROAD), 2, "the other two roads stay")
 
@@ -302,7 +389,7 @@ func test_a_tile_can_be_replaced_once_and_goes_back_to_the_shop() -> void:
 	var park_before: int = gs.shop[park_slot]["count"]
 	var kiosk_before: int = gs.shop[kiosk]["count"]
 	check(gs.can_replace(kiosk, 0), "a bought tile can be replaced")
-	check(not gs.can_replace(kiosk, 1), "an empty lot is not a replacement")
+	check(not gs.can_replace(kiosk, at(1)), "an empty lot is not a replacement")
 	var old := gs.replace_tile(kiosk, 0)
 	eq(old["kind"], K.PARK, "the park is what got replaced")
 	eq(gs.players[me].cells[0]["kind"], K.KIOSK, "the kiosk stands there now")
@@ -310,9 +397,9 @@ func test_a_tile_can_be_replaced_once_and_goes_back_to_the_shop() -> void:
 	eq(gs.purchases, 1, "it counts as a buy")
 	eq(gs.shop[park_slot]["count"], park_before + 1, "the park is back in the construction site")
 	eq(gs.shop[kiosk]["count"], kiosk_before - 1, "the kiosk left it")
-	check(not gs.can_replace(kiosk, 2), "only once")
-	eq(gs.replace_tile(kiosk, 2), {}, "a second replacement is refused")
-	eq(gs.players[me].cells[2]["kind"], K.TREES, "and changes nothing")
+	check(not gs.can_replace(kiosk, at(2)), "only once")
+	eq(gs.replace_tile(kiosk, at(2)), {}, "a second replacement is refused")
+	eq(gs.players[me].cells[at(2)]["kind"], K.TREES, "and changes nothing")
 
 
 func test_free_roads_and_gifts_cannot_be_replaced() -> void:
@@ -360,7 +447,7 @@ func test_a_bonus_tile_is_placed_like_a_free_road() -> void:
 	var gs := _game()
 	var me := gs.current_index()
 	_play(gs, "park_donation")
-	check(not gs.place_bonus_tile(0, 99), "not off the mat")
+	check(not gs.place_bonus_tile(0, Grid.CELLS - 1), "a park does not fit on the last square")
 	check(gs.place_bonus_tile(0, 10), "placed")
 	eq(gs.players[me].cells[10]["kind"], K.PARK, "the park is on the mat")
 	check(gs.players[me].cells[10].get("free", false), "marked as free")
@@ -444,7 +531,7 @@ func test_debt_relief_removes_one_loan() -> void:
 
 func test_choice_cards_need_a_choice() -> void:
 	var gs := _game()
-	gs.begin_card("roads_or_greenery")
+	_begin(gs, "roads_or_greenery")
 	check(gs.card_needs_choice(), "needs a choice")
 	eq(gs.resolve_turn_card(), {}, "no choice, no effect")
 	var options := gs.card_choice_options()
@@ -460,7 +547,7 @@ func test_choice_cards_need_a_choice() -> void:
 func test_a_payment_you_cannot_make_is_not_offered() -> void:
 	var gs := _game()
 	gs.current_player().money = 1
-	gs.begin_card("illegal_tree_recovery")
+	_begin(gs, "illegal_tree_recovery")
 	var options := gs.card_choice_options()
 	check(not options[0]["available"], "cannot pay 2 gold with 1")
 	check(options[1]["available"], "can lose a tree")
@@ -469,13 +556,13 @@ func test_a_payment_you_cannot_make_is_not_offered() -> void:
 
 func test_bots_pick_the_cheaper_option() -> void:
 	var gs := _game()
-	gs.begin_card("bribery_scandal")
+	_begin(gs, "bribery_scandal")
 	var pick := CardEffects.pick_option(gs, gs.current_index(), gs.card_choice_options())
 	eq(pick, 0, "3 gold is cheaper than 2 points")
 	gs.current_player().money = 0
 	pick = CardEffects.pick_option(gs, gs.current_index(), gs.card_choice_options())
 	eq(pick, 1, "with no gold the points go")
-	gs.begin_card("planners_pick")
+	_begin(gs, "planners_pick")
 	gs.current_player().money = 100
 	check(CardEffects.pick_option(gs, gs.current_index(), gs.card_choice_options()) in [0, 1], "a good choice either way")
 
@@ -486,13 +573,13 @@ func test_the_coin_flip_picks_the_deck_and_draws_a_card() -> void:
 	var gs := _game()
 	var before_e := gs.card_deck_count(CardDefs.EVENT)
 	var before_p := gs.card_deck_count(CardDefs.PENALTY)
-	eq([before_e, before_p], [64, 64], "full decks")
+	eq([before_e, before_p], [32, 32], "full decks")
 	var draw := gs.flip_and_draw()
 	check(draw["coin"] in ["heads", "tails"], "a coin")
 	eq(draw["type"], CardDefs.EVENT if draw["coin"] == "heads" else CardDefs.PENALTY, "heads is an event, tails a penalty")
 	eq(CardDefs.type_of(draw["id"]), draw["type"], "the card is from that deck")
-	eq(gs.card_deck_count(draw["type"]), 63, "the deck shrinks")
-	eq(gs.card_deck_count(CardDefs.EVENT) + gs.card_deck_count(CardDefs.PENALTY), 127, "only one card was drawn")
+	eq(gs.card_deck_count(draw["type"]), 31, "the deck shrinks")
+	eq(gs.card_deck_count(CardDefs.EVENT) + gs.card_deck_count(CardDefs.PENALTY), 63, "only one card was drawn")
 	eq(gs.flip_and_draw(), {}, "one card per turn")
 	check(gs.has_pending_card(), "waiting to be resolved")
 
@@ -521,7 +608,7 @@ func test_no_card_comes_twice_in_a_game() -> void:
 func test_a_turn_starts_clean() -> void:
 	var gs := _game()
 	gs.flip_and_draw()
-	gs.begin_card("extra_hands")
+	_begin(gs, "extra_hands")
 	gs.resolve_turn_card()
 	gs.reset_turn_state()
 	eq(gs.buy_limit(), 4, "modifiers are gone")
@@ -551,9 +638,9 @@ func _busy_game(seed_value: int) -> GameState:
 	for p in gs.players:
 		for k in 24:
 			var slot := rng.randi() % gs.shop.size()
-			var cell := rng.randi() % 49
-			if p.cells[cell] == null:
-				p.cells[cell] = gs.shop[slot]["tile"].duplicate()
+			var tile: Dictionary = gs.shop[slot]["tile"].duplicate()
+			var spots := Grid.valid_anchors(p.cells, TileDefs.footprint(tile))
+			Grid.place(p.cells, spots[rng.randi() % spots.size()], tile)
 		p.money = rng.randi_range(0, 120)
 		p.loans = rng.randi() % 3
 	return gs
@@ -563,11 +650,11 @@ func test_every_card_resolves_safely_on_busy_and_empty_mats() -> void:
 	for id in CardDefs.ids(CardDefs.EVENT) + CardDefs.ids(CardDefs.PENALTY):
 		for variant in 3:
 			var gs := _busy_game(10 + variant) if variant < 2 else _game(3, 4)
-			gs.begin_card(id)
+			_begin(gs, id)
 			var n := gs.card_choice_options().size() if gs.card_needs_choice() else 1
 			for choice in n:
 				var g := _busy_game(10 + variant) if variant < 2 else _game(3, 4)
-				g.begin_card(id)
+				_begin(g, id)
 				var opts := g.card_choice_options()
 				var r := g.resolve_turn_card(choice if g.card_needs_choice() else -1)
 				if g.card_needs_choice() and not opts[choice]["available"]:
@@ -577,7 +664,7 @@ func test_every_card_resolves_safely_on_busy_and_empty_mats() -> void:
 				for p in g.players:
 					check(p.money >= 0, "%s: money stays positive" % id)
 					check(p.loans >= 0 and p.free_roads >= 0, "%s: counters stay positive" % id)
-					eq(p.cells.size(), 49, "%s: the mat keeps its size" % id)
+					eq(p.cells.size(), Grid.CELLS, "%s: the mat keeps its size" % id)
 				for i in g.players.size():
 					check(g.score(i)["total"] > -500, "%s: score stays sane" % id)
 
@@ -593,7 +680,7 @@ func test_new_point_cards_give_points_to_the_right_players() -> void:
 	var gs2 := _game(2)
 	var me2 := gs2.current_index()
 	_play(gs2, "ribbon_cutting")
-	eq([gs2.players[me2].card_points, gs2.players[me2].money], [1, 129], "ribbon cutting: a point and 4 gold")
+	eq([gs2.players[me2].card_points, gs2.players[me2].money], [1, 104], "ribbon cutting: a point and 4 gold")
 	var gs3 := _game(3)
 	gs3.players[0].cells = mat(["PP.....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	gs3.players[1].cells = mat(["P......", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
@@ -638,7 +725,7 @@ func test_interest_and_combined_cards() -> void:
 	eq(gs.players[me].money, 100, "no loan, no interest")
 	gs.players[me].cells = mat(["MPP....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	_play(gs, "grand_opening")
-	eq([gs.players[me].money, gs.players[me].card_points], [130, 1], "a market earns gold and a point")
+	eq([gs.players[me].money, gs.players[me].card_points], [105, 1], "a market earns gold and a point")
 	var g2 := _game(2)
 	var rich := 0 if g2.players[0].money >= g2.players[1].money else 1
 	g2.players[rich].money = 140

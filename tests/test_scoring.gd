@@ -9,9 +9,15 @@ const CLEAN := "PPP...."
 const EMPTY := "......."
 
 
+## The home that stands on cell `index` of the old 7x7 layout the tests are written in (see `mat`).
 func _home(result: Dictionary, index: int) -> Dictionary:
+	return _home_at(result, at(index))
+
+
+## The home whose top-left square is `anchor`.
+func _home_at(result: Dictionary, anchor: int) -> Dictionary:
 	for a in result["apartments"]:
-		if a["index"] == index:
+		if a["index"] == anchor:
 			return a
 	return {}
 
@@ -23,14 +29,18 @@ func _need(member: Dictionary, id: String) -> Dictionary:
 	return {}
 
 
-func test_neighbours_and_park_area_on_7x7() -> void:
-	eq(Scoring.SIZE, 7, "mat size")
+func test_neighbours_and_park_area_on_14x14() -> void:
+	eq(Scoring.SIZE, 14, "mat size")
 	eq(Scoring.neighbours(0).size(), 2, "corner")
-	eq(Scoring.neighbours(24).size(), 4, "centre")
+	eq(Scoring.neighbours(15).size(), 4, "centre")
 	eq(Scoring.neighbours(3).size(), 3, "edge")
-	check(Scoring.in_park_area(24, 32), "diagonal is in the 3x3")
-	check(not Scoring.in_park_area(24, 40), "two away is outside")
-	check(not Scoring.in_park_area(24, 24), "a park is not in its own area")
+	# a park (2x2) with its top-left square at (6, 6): its area reaches 2 squares out, diagonals included
+	var park := 6 * 14 + 6
+	check(Scoring.in_park_area(park, 8 * 14 + 8), "the diagonal square right beside it is in the area")
+	check(Scoring.in_park_area(park, 6 * 14 + 8), "the square right beside it is in the area")
+	check(Scoring.in_park_area(park, 6 * 14 + 9), "one empty square between is still in the area")
+	check(not Scoring.in_park_area(park, 6 * 14 + 10), "two empty squares between is outside")
+	check(not Scoring.in_park_area(park, park + 1), "a park is not in its own area")
 
 
 func test_student_with_both_needs_met_and_a_like_reaches_plus_three() -> void:
@@ -92,13 +102,13 @@ func test_parking_within_reach_is_a_like_for_a_worker() -> void:
 
 func test_older_feels_heat_twice_a_worker_once_and_shade_removes_it() -> void:
 	# unshaded 3-road walk to the supermarket
-	var rows := ["sRRR...", "...S...", EMPTY, EMPTY, EMPTY, EMPTY, CLEAN]
+	var rows := ["sRRRS..", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, CLEAN]
 	var older: Dictionary = _home(Scoring.evaluate(mat(rows, {0: 1}), 0), 0)["members"][0]
 	eq(older["role"], "older", "older role")
 	eq(older["heat"], 2, "older heat is doubled")
 	var worker: Dictionary = _home(Scoring.evaluate(mat(rows, {0: 0}), 0), 0)["members"][0]
 	eq(worker["heat"], 1, "worker heat")
-	var shaded := ["sRRR...", "..TS...", EMPTY, EMPTY, EMPTY, EMPTY, CLEAN]
+	var shaded := ["sRRRS..", "..T....", EMPTY, EMPTY, EMPTY, EMPTY, CLEAN]
 	eq(_home(Scoring.evaluate(mat(shaded, {0: 1}), 0), 0)["members"][0]["heat"], 0, "trees shade the walk")
 
 
@@ -123,7 +133,7 @@ func test_home_points_are_the_sum_of_its_members() -> void:
 
 func test_an_unused_service_costs_a_point() -> void:
 	var r := Scoring.evaluate(mat(["L......", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY]), 0)
-	eq(r["unused"], [0], "unused list")
+	eq(r["unused"], [at(0)], "unused list")
 	eq(r["unused_penalty"], 1, "penalty")
 	eq(r["total"], -1, "total")
 
@@ -166,22 +176,36 @@ func test_pollution_scale_for_7x7() -> void:
 	eq(Scoring.pollution_penalty(7), 0, "7")
 
 
+## Is any square of the tile whose top-left square is `anchor` shaded?
+func _shaded(result: Dictionary, cells: Array, anchor: int) -> bool:
+	for c in Grid.squares_of(cells, anchor):
+		if result["shaded"][c]:
+			return true
+	return false
+
+
 func test_roads_next_to_trees_or_a_park_are_shaded() -> void:
-	var r := Scoring.evaluate(mat(["RRT....", "P......", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY]), 0)
-	check(r["shaded"][1], "road beside trees")
-	check(r["shaded"][0], "road beside the park")
+	var cells := mat(["RRT....", "P......", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
+	var r := Scoring.evaluate(cells, 0)
+	check(_shaded(r, cells, at(1)), "road beside trees")
+	check(_shaded(r, cells, at(0)), "road beside the park")
 
 
 func test_a_shaded_route_is_preferred_among_equally_short_ones() -> void:
-	# two 3-road ways to the hospital; a tree shades the lower one
-	var rows := [".RRR...", ".s.H...", ".RRR...", ".T.....", EMPTY, EMPTY, CLEAN]
-	var home := _home(Scoring.evaluate(mat(rows), 0), 8)
-	check(home["routes"].has(10), "hospital is reachable")
-	eq(home["routes"][10]["length"], 3, "route length")
-	check(home["routes"][10]["shaded"], "the shaded way is kept")
-	rows[3] = EMPTY
-	home = _home(Scoring.evaluate(mat(rows), 0), 8)
-	check(not home["routes"][10]["shaded"], "no tree, no shade")
+	# a worker's home and a market with two road squares-long ways between them; a tree shades the lower one
+	var rows := blank14()
+	put(rows, 2, 2, "RRR")
+	put(rows, 2, 3, "s.M")
+	put(rows, 2, 4, "RRR")
+	put(rows, 3, 5, "T")
+	var home := _home_at(Scoring.evaluate(mat14(rows), 0), 3 * 14 + 2)
+	var market := 3 * 14 + 4
+	check(home["routes"].has(market), "the market is reachable")
+	eq(home["routes"][market]["length"], 3, "route length in squares")
+	check(home["routes"][market]["shaded"], "the shaded way is kept")
+	rows[5] = ".".repeat(14)
+	home = _home_at(Scoring.evaluate(mat14(rows), 0), 3 * 14 + 2)
+	check(not home["routes"][market]["shaded"], "no tree, no shade")
 
 
 func test_happy_and_unhappy_citizens_are_counted_per_citizen() -> void:
@@ -198,10 +222,14 @@ func test_hovering_a_road_on_an_equally_short_route_still_finds_the_connection()
 	# home 0 and market 8 touch both roads (1 and 7); only one of them is the route that is scored
 	var cells := mat(["sR.....", "RM.....", EMPTY, EMPTY, EMPTY, EMPTY, EMPTY])
 	var home := _home(Scoring.evaluate(cells, 0), 0)
-	var used: int = home["routes"][8]["path"][0]
-	var other := 7 if used == 1 else 1
-	eq(Influence._alternative_path(cells, 0, 8, other, 1), [other], "the other road connects them too")
-	eq(Influence._alternative_path(cells, 0, 8, 9, 1), [], "a lot that is not a road does not")
+	var used: int = home["routes"][at(8)]["path"][0]
+	var other := at(7) if used in Grid.footprint(at(1), 2) else at(1)
+	var length: int = home["routes"][at(8)]["length"]
+	var connects := false
+	for square in Grid.footprint(other, 2):
+		connects = connects or not Influence._alternative_path(cells, at(0), at(8), square, length).is_empty()
+	check(connects, "the other road connects them too")
+	eq(Influence._alternative_path(cells, at(0), at(8), at(9), length), [], "a lot that is not a road does not")
 
 
 # ================================================================ variety bonus
@@ -275,7 +303,7 @@ func test_a_resident_with_a_disability_and_an_expat_are_scored_by_their_own_need
 	check(_need(expat, "work")["met"] and _need(expat, "dining")["met"], "workplace and restaurant are met")
 	# without the restaurant the expat has a named complaint
 	var no_restaurant := _six_kinds()
-	no_restaurant[20] = null
+	Grid.remove(no_restaurant, at(20))
 	expat = _home(Scoring.evaluate(no_restaurant, 0), 6)["members"][0]
 	check(not _need(expat, "dining")["met"], "no restaurant, no dining")
 	eq(expat["complaint_detail"] if expat["happiness"] < 0 else "No restaurant within reach", "No restaurant within reach", "the complaint names it")

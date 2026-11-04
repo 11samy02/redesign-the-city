@@ -262,10 +262,10 @@ func _on_deck_tapped(type: String) -> void:
 	Sfx.play("pick")
 	var picked = _decks[type]
 	_from_rect = picked.card_rect()
-	picked.modulate.a = 0.0
+	picked.vanish()
 	for t in _decks:
 		if t != type:
-			_tw().tween_property(_decks[t], "modulate:a", 0.0, 0.25)
+			_decks[t].fade_to(0.0, 0.25)
 	_tapped.emit()
 
 
@@ -573,6 +573,7 @@ class DeckPick extends Control:
 	var _glow := false
 	var _hover := false
 	var _tween: Tween
+	var _fade: Tween
 	var lift := 0.0:
 		set(v):
 			lift = v
@@ -633,13 +634,28 @@ class DeckPick extends Control:
 		_live = true
 		_glow = glow
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		create_tween().tween_property(self, "modulate:a", 1.0 if glow else 0.5, 0.25)
+		fade_to(1.0 if glow else 0.5, 0.25)
 		if glow:
 			_kill_tween()
 			_tween = create_tween().set_loops()
 			_tween.tween_property(self, "lift", 12.0, 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 			_tween.tween_property(self, "lift", 3.0, 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		queue_redraw()
+
+	## Fades the deck, replacing any fade still running (a quick tap must not be undone by the fade-in).
+	func fade_to(alpha: float, seconds: float) -> void:
+		if _fade != null and _fade.is_valid():
+			_fade.kill()
+		_fade = create_tween()
+		_fade.tween_property(self, "modulate:a", alpha, seconds)
+
+	## The deck's card has been drawn: it is gone for good, along with its glow and bobbing.
+	func vanish() -> void:
+		if _fade != null and _fade.is_valid():
+			_fade.kill()
+		_kill_tween()
+		modulate.a = 0.0
+		visible = false
 
 	func shake() -> void:
 		_kill_tween()

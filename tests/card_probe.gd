@@ -6,6 +6,7 @@ extends Node
 ##   godot --path . --resolution 1600x900 -- --probe=cards [--only=<card id>]
 
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 const CardDefs = preload("res://scripts/core/card_defs.gd")
 
 ## Counts the errors Godot reports while a card runs.
@@ -139,14 +140,14 @@ func _click_at(pos: Vector2) -> void:
 
 ## A mat with every kind of tile on it and a few empty lots.
 func _full_mat() -> Array:
-	var cells: Array = []
-	for k in TileDefs.Kind.values():
-		cells.append(TileDefs.make(k))
+	var cells := Grid.empty()
+	var kinds: Array = TileDefs.Kind.values()
 	for k in [TileDefs.Kind.ROAD, TileDefs.Kind.ROAD, TileDefs.Kind.ROAD, TileDefs.Kind.ROAD, TileDefs.Kind.TREES, TileDefs.Kind.PARK,
 			TileDefs.Kind.APT_S, TileDefs.Kind.APT_M, TileDefs.Kind.APT_L, TileDefs.Kind.COFFEE_SHOP, TileDefs.Kind.KIOSK, TileDefs.Kind.CLINIC]:
-		cells.append(TileDefs.make(k))
-	while cells.size() < 49:
-		cells.append(null)
+		kinds.append(k)
+	# every tile gets its own 2x2 block of squares, seven blocks to a row, so any size fits
+	for n in kinds.size():
+		Grid.place(cells, (n / 7) * 2 * Grid.SIZE + (n % 7) * 2, TileDefs.make(kinds[n]))
 	return cells
 
 
@@ -223,7 +224,9 @@ func _play_card(id: String, choice: int) -> void:
 
 func _place_bonus(tag: String) -> void:
 	var p = _scene.gs.current_player()
-	var empty: int = p.cells.find(null)
+	# a lot where the gift fits, whatever its size
+	var spots := Grid.valid_anchors(p.cells, TileDefs.footprint(p.bonus_tiles[0]))
+	var empty: int = spots[spots.size() / 3] if not spots.is_empty() else p.cells.find(null)
 	var before: int = p.bonus_tiles.size()
 	_click_at(_scene._action_bar.bonus_button_rect().get_center())
 	for i in 10:

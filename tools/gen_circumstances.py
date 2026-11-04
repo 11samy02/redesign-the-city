@@ -1,4 +1,4 @@
-"""Generates the 32 hidden circumstance card illustrations for Egkomi City.
+"""Generates the 32 hidden circumstance card illustrations for Redesign the City.
 
 Run from the project root:  python tools/gen_circumstances.py
 Uses the palette and helpers of gen_art.py. Each card is a 256x256 scene with a rim in the

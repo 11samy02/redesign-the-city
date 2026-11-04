@@ -50,6 +50,8 @@ func show_tile(tile: Dictionary, anchor: Rect2, lines: Array, show_cost: bool, r
 	var chip_row := HBoxContainer.new()
 	chip_row.add_theme_constant_override("separation", 6)
 	chip_row.add_child(UiKit.chip(cat, UiKit.CATEGORY_COLORS[cat]))
+	# how much of the mat the tile covers
+	chip_row.add_child(UiKit.chip("%s tile" % TileDefs.size_label(tile), UiKit.PANEL_HI, UiKit.LIMESTONE))
 	if TileDefs.is_home(tile["kind"]):
 		var who := TileDefs.members(tile)
 		if not who.is_empty():

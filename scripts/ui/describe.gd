@@ -7,6 +7,7 @@ const Roles = preload("res://scripts/core/roles.gd")
 const Scoring = preload("res://scripts/core/scoring.gd")
 const CircumstanceDefs = preload("res://scripts/core/circumstance_defs.gd")
 const GameState = preload("res://scripts/core/game_state.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
 ## Complaint types with what they mean and the fix. An unhappy citizen's own words (for example
 ## "No library within reach") come with the complaint as its detail.
@@ -18,7 +19,7 @@ const COMPLAINTS := {
 	},
 	"Walkability": {
 		"icon": "res://assets/ui/walk.svg",
-		"meaning": "A walk of 3+ roads with no shade.",
+		"meaning": "A long walk (6+ road squares) with no shade.",
 		"fix": "Shade long walks with trees or a park, or shorten them",
 	},
 	"Greenery": {
@@ -121,13 +122,24 @@ static func shop_lines(tile: Dictionary, money: int, buys_left: int) -> Array[St
 	return lines
 
 
-static func cell_lines(cells: Array, result: Dictionary, i: int) -> Array[String]:
+## "Size 2:2: covers 4 squares (2 x 2) of your mat." / "Size 1:1: covers 1 square, half the width of a 2:2 tile."
+static func size_text(tile: Dictionary) -> String:
+	if TileDefs.footprint(tile) == 1:
+		return "Size 1:1: covers 1 square, half the width of a 2:2 tile."
+	return "Size 2:2: covers 4 squares (2 x 2) of your mat."
+
+
+## Tooltip lines for the tile on square `square` (any square of it).
+static func cell_lines(cells: Array, result: Dictionary, square: int) -> Array[String]:
 	var lines: Array[String] = []
-	var t = cells[i]
-	if t == null:
+	var i := Grid.anchor_of(cells, square)
+	if i < 0:
 		lines.append("Empty lot.")
 		return lines
+	var t: Dictionary = cells[i]
 	var kind: int = t["kind"]
+	if t.get("fixed", false) and not TileDefs.is_home(kind):
+		lines.append(_c(NOTE, "Came with the mat: it cannot be replaced or lost."))
 	if TileDefs.is_home(kind):
 		for a in result["apartments"]:
 			if a["index"] == i:
@@ -141,12 +153,13 @@ static func cell_lines(cells: Array, result: Dictionary, i: int) -> Array[String
 			for a in result["apartments"]:
 				if i in a["green_sources"]:
 					homes += 1
-			var shades := 0
-			for n in Scoring.neighbours(i):
+			var shaded_roads := {}
+			for n in Grid.border(i, TileDefs.footprint(t)):
 				if cells[n] != null and cells[n]["kind"] == TileDefs.Kind.ROAD:
-					shades += 1
+					shaded_roads[Grid.anchor_of(cells, n)] = true
+			var shades := shaded_roads.size()
 			lines.append(_c(GOOD, "Pollution %d on this mat (now %d)." % [-3 if kind == TileDefs.Kind.PARK else -1, result["pollution"]]))
-			var area := "in its 3x3 area" if kind == TileDefs.Kind.PARK else "next to it"
+			var area := "within 2 squares of it" if kind == TileDefs.Kind.PARK else "next to it"
 			lines.append(("Cheers up %s %s." % [_plural(homes, "home"), area]) if homes > 0 else _c(NOTE, "No homes %s yet." % area))
 			if kind == TileDefs.Kind.PARK:
 				var kids := _citizens_who(result, func(a, m): return i in a["green_sources"] and m["role"] == Roles.CHILD)
@@ -162,15 +175,18 @@ static func cell_lines(cells: Array, result: Dictionary, i: int) -> Array[String
 						homes += 1
 				lines.append(_c(GOOD, "Acts as trees: pollution -1 on this mat (now %d)." % result["pollution"]))
 				lines.append(("Cheers up %s next to it." % _plural(homes, "home")) if homes > 0 else _c(NOTE, "No homes next to it yet."))
-			elif result["shaded"][i]:
+			elif _any_shaded(result, cells, i):
 				lines.append(_c(GOOD, "Shaded by greenery: long walks here stay cool."))
 			else:
 				lines.append(_c(NOTE, "Not shaded. Trees or a park next to it give shade."))
 			var uses := 0
+			var squares := Grid.squares_of(cells, i)
 			for a in result["apartments"]:
 				for m in a["routes"]:
-					if i in a["routes"][m]["path"]:
-						uses += a["citizens"]
+					for c in squares:
+						if c in a["routes"][m]["path"]:
+							uses += a["citizens"]
+							break
 			lines.append(("Part of the routes of %s." % _plural(uses, "citizen")) if uses > 0 else _c(NOTE, "Not part of a route yet."))
 	return lines
 
@@ -183,6 +199,13 @@ static func _citizens_who(result: Dictionary, test: Callable) -> int:
 			if test.call(a, m):
 				n += 1
 	return n
+
+
+static func _any_shaded(result: Dictionary, cells: Array, anchor: int) -> bool:
+	for c in Grid.squares_of(cells, anchor):
+		if result["shaded"][c]:
+			return true
+	return false
 
 
 static func _service_lines(lines: Array[String], cells: Array, result: Dictionary, i: int) -> void:
@@ -217,9 +240,13 @@ static func _service_lines(lines: Array[String], cells: Array, result: Dictionar
 		if needed == 0 and liked == 0:
 			lines.append(_c(NOTE, "Nobody nearby needs or likes it."))
 	var dislikers := 0
+	var own := Grid.squares_of(cells, i)
 	for a in result["apartments"]:
+		var next_door := false
+		for c in Grid.border(a["index"], TileDefs.footprint(cells[a["index"]])):
+			next_door = next_door or c in own
 		for m in a["members"]:
-			if m["dislike"] and i in Scoring.neighbours(a["index"]):
+			if m["dislike"] and next_door:
 				dislikers += 1
 	if dislikers > 0:
 		lines.append(_c(BAD, "%s dislike having it right next door." % _plural(dislikers, "citizen")))
@@ -276,7 +303,7 @@ static func _route_text(a: Dictionary, source: int, cells: Array) -> String:
 	if not a["routes"].has(source):
 		return ""
 	var r: Dictionary = a["routes"][source]
-	var how := "(%s" % _plural(r["length"], "road")
+	var how := "(%s" % _plural(r["length"], "road square")
 	if r["length"] >= Scoring.LONG_ROUTE:
 		how += ", shaded" if r["shaded"] else ", no shade"
 	return how + ")"

@@ -11,10 +11,15 @@ signal reflect_pressed
 signal cities_pressed
 signal again_pressed
 signal menu_pressed
-## The "Cards" button of a row: the seat of that planner.
-signal cards_pressed(index: int)
 
 const PLACES := ["1st", "2nd", "3rd", "4th"]
+## How much each place stands out: row height, avatar, name, points and rank sizes, and how far the
+## row is set in from both sides. The winner is the biggest, then it steps down.
+const TIERS := [
+	{"height": 112, "avatar": 72, "name": 36, "sub": 17, "points": 50, "rank": 44, "inset": 0},
+	{"height": 88, "avatar": 58, "name": 29, "sub": 16, "points": 38, "rank": 32, "inset": 22},
+	{"height": 68, "avatar": 46, "name": 23, "sub": 15, "points": 29, "rank": 25, "inset": 44},
+]
 
 var _screen
 var _gs
@@ -45,9 +50,9 @@ func _ready() -> void:
 	var sb := UiKit.box(UiKit.PANEL, 28, 2, UiKit.LINE, 34)
 	sb.shadow_color = Color(0, 0, 0, 0.5)
 	sb.shadow_size = 40
-	var card := OverlayKit.add_card(self, sb, 900)
+	var card := OverlayKit.add_card(self, sb, 880)
 	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 14)
+	v.add_theme_constant_override("separation", 12)
 	card.add_child(v)
 	_crown = UiKit.icon("res://assets/ui/crown.svg", 84)
 	var crown_box := CenterContainer.new()
@@ -98,17 +103,17 @@ func _headline_text() -> String:
 	return "%s wins!" % winners[0] if winners.size() == 1 else "%s share the win!" % " and ".join(PackedStringArray(winners))
 
 
-## The hidden circumstances that shaped this game, in the order they were revealed.
+## The hidden circumstances that shaped this game, in the order they were revealed: icons, the name
+## shows when you hover one.
 func _build_circumstance_recap() -> Control:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 16)
+	row.add_theme_constant_override("separation", 10)
 	for id in _gs.revealed:
-		var chip := HBoxContainer.new()
-		chip.add_theme_constant_override("separation", 6)
-		chip.add_child(UiKit.icon(CircumstanceDefs.art_path(id), 34))
-		chip.add_child(UiKit.label(CircumstanceDefs.title(id), 15, UiKit.MUTED, "body_bold"))
-		row.add_child(chip)
+		var icon := UiKit.icon(CircumstanceDefs.art_path(id), 40)
+		icon.tooltip_text = CircumstanceDefs.title(id)
+		icon.mouse_filter = Control.MOUSE_FILTER_PASS
+		row.add_child(icon)
 	return row
 
 
@@ -120,34 +125,44 @@ func _build_row(i: int) -> Control:
 	var p = _gs.players[i]
 	var r: Dictionary = _results[i]
 	var col := UiKit.player_color(p.color_index)
-	var first: bool = _ranks[i] == 1
+	var rank: int = _ranks[i]
+	var first := rank == 1
+	var tier: Dictionary = TIERS[mini(rank, TIERS.size()) - 1]
+	var wrap := MarginContainer.new()
+	wrap.add_theme_constant_override("margin_left", tier["inset"])
+	wrap.add_theme_constant_override("margin_right", tier["inset"])
+	var bg := Color(UiKit.GOLD, 0.18) if first else (UiKit.PANEL_HI if rank == 2 else Color(UiKit.PANEL_HI, 0.55))
+	var sb := UiKit.box(bg, 20 if first else 16, 3 if first else 0, UiKit.GOLD, 14)
+	if first:
+		sb.shadow_color = Color(UiKit.GOLD, 0.28)
+		sb.shadow_size = 18
 	var rp := PanelContainer.new()
-	rp.add_theme_stylebox_override("panel", UiKit.box(Color(UiKit.GOLD, 0.16) if first else UiKit.PANEL_HI, 16, 2 if first else 0, UiKit.GOLD, 12))
+	rp.custom_minimum_size.y = tier["height"]
+	rp.add_theme_stylebox_override("panel", sb)
+	wrap.add_child(rp)
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 14)
 	rp.add_child(h)
-	var rank_l := UiKit.label(ordinal(_ranks[i]), 30, UiKit.GOLD if first else UiKit.MUTED, "display_bold")
-	rank_l.custom_minimum_size.x = 64
+	var rank_l := UiKit.label(ordinal(rank), tier["rank"], UiKit.GOLD if first else (UiKit.LIMESTONE if rank == 2 else UiKit.MUTED), "display_bold")
+	rank_l.custom_minimum_size.x = tier["rank"] * 1.9
+	rank_l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(rank_l)
-	var av := Widgets.Avatar.new(46)
+	var av := Widgets.Avatar.new(tier["avatar"])
 	av.color = col
 	av.letter = p.name.substr(0, 1).to_upper()
+	av.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(av)
 	var nv := VBoxContainer.new()
 	nv.add_theme_constant_override("separation", -2)
 	nv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	nv.add_child(UiKit.label(p.name, 24, col.lightened(0.25), "display_bold"))
-	nv.add_child(UiKit.label("%d of %d citizens happy, %d loan%s, %d gold left" % [r["happy_citizens"], r["citizens"], r["loans"], "" if r["loans"] == 1 else "s", p.money], 15, UiKit.MUTED))
+	nv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	nv.add_child(UiKit.label(p.name, tier["name"], col.lightened(0.25), "display_bold"))
+	nv.add_child(UiKit.label("%d of %d citizens happy, %d loan%s, %d gold left" % [r["happy_citizens"], r["citizens"], r["loans"], "" if r["loans"] == 1 else "s", p.money], tier["sub"], UiKit.MUTED))
 	h.add_child(nv)
-	var drawn: int = _gs.cards_drawn_by(i).size()
-	if drawn > 0:
-		var cards_btn := UiKit.button("%d cards" % drawn, "ghost", 16)
-		cards_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		cards_btn.tooltip_text = "See every event and penalty card %s drew, and what each one did." % p.name
-		cards_btn.pressed.connect(func(): cards_pressed.emit(i))
-		h.add_child(cards_btn)
-	h.add_child(UiKit.label(Describe.points(r["total"]), 32, UiKit.LIMESTONE, "display_bold"))
-	return rp
+	var pts := UiKit.label(Describe.points(r["total"]), tier["points"], UiKit.GOLD if first else (UiKit.LIMESTONE if rank == 2 else UiKit.MUTED), "display_bold")
+	pts.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(pts)
+	return wrap
 
 
 func _build_buttons() -> HBoxContainer:

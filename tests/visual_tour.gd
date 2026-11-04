@@ -7,6 +7,7 @@ const Scoring = preload("res://scripts/core/scoring.gd")
 const TileDefs = preload("res://scripts/core/tile_defs.gd")
 const Bot = preload("res://scripts/core/bot.gd")
 const GameState = preload("res://scripts/core/game_state.gd")
+const Grid = preload("res://scripts/core/grid.gd")
 
 var out_dir := ""
 var players := 4
@@ -385,8 +386,8 @@ func _play_turn(game, gs, turn: int) -> void:
 		await _wait(0.9)
 	if gs.round_number == 3 and gs.turn == 0:
 		var apt := -1
-		for i in 49:
-			if p.cells[i] != null and TileDefs.is_home(p.cells[i]["kind"]):
+		for i in Grid.anchors(p.cells):
+			if TileDefs.is_home(p.cells[i]["kind"]):
 				apt = i
 		if apt >= 0:
 			game._on_cell_hovered(apt, true)
@@ -403,11 +404,11 @@ func _play_turn(game, gs, turn: int) -> void:
 func _best_cell(p, tile: Dictionary, gs) -> Array:
 	var base: int = Scoring.evaluate(p.cells, p.loans)["total"]
 	var best := [-1, -999]
-	for c in 49:
-		if p.cells[c] != null:
+	for c in Grid.CELLS:
+		if not Grid.fits(p.cells, c, TileDefs.footprint(tile)):
 			continue
 		var cells: Array = p.cells.duplicate()
-		cells[c] = tile
+		Grid.place(cells, c, tile)
 		var d: int = Scoring.evaluate(cells, p.loans)["total"] - base
 		if d > best[1]:
 			best = [c, d]
@@ -432,11 +433,9 @@ func _best_move(gs) -> Array:
 			for s in gs.shop.size():
 				if gs.can_afford(s):
 					slots.append(s)
-		var empty := []
-		for c in 49:
-			if p.cells[c] == null:
-				empty.append(c)
-		return [slots.pick_random(), empty.pick_random(), 0.0]
+		var slot: int = slots.pick_random()
+		var empty := Grid.valid_anchors(p.cells, TileDefs.footprint(gs.stack_tile(slot)))
+		return [slot, empty.pick_random(), 0.0]
 	var best := [-1, -1, -9999.0]
 	for s in gs.shop.size():
 		if not gs.can_afford(s):

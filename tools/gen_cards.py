@@ -1,4 +1,4 @@
-"""Generates the 128 pictures of the event and penalty cards of Egkomi City, one for every card.
+"""Generates the 128 pictures of the event and penalty cards of Redesign the City, one for every card.
 
 Run from the project root:  python tools/gen_cards.py          (writes assets/cards/<card id>.svg)
 
